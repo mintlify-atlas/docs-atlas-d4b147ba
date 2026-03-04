@@ -34,6 +34,17 @@ Optional Discord bot token for Discord integration features.
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 ```
 
+### HEADLESS
+
+Controls whether Playwright browsers run in headless mode. Not defined in `config.py` but read directly in site handlers.
+
+```python
+# Used in hitomi.py and nhentai.py
+is_headless = os.getenv("HEADLESS", "false").lower() == "true"
+```
+
+Set to `"true"` to run browsers without a visible window. Defaults to `"false"`.
+
 ## Browser identity
 
 ### USER_AGENT
