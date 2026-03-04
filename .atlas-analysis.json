@@ -1,0 +1,109 @@
+{
+  "projectType": "saas",
+  "projectName": "Universal Manga Downloader",
+  "projectDescription": "A powerful tool to automate manga downloads from popular sites and convert them into high-quality PDFs with a Next.js web interface and Python core.",
+  "theme": "palm",
+  "primaryColor": "#94cb04",
+  "lightColor": "#545454",
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deployment/web-app",
+              "deployment/desktop-app",
+              "deployment/discord-bot",
+              "deployment/docker"
+            ]
+          },
+          {
+            "group": "Supported Sites",
+            "pages": [
+              "sites/overview",
+              "sites/zonatmo",
+              "sites/tmo",
+              "sites/m440",
+              "sites/h2r",
+              "sites/hitomi",
+              "sites/nhentai"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/security",
+              "concepts/async-downloads",
+              "concepts/pdf-generation"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core Module",
+            "pages": [
+              "api/handler",
+              "api/config",
+              "api/utils"
+            ]
+          },
+          {
+            "group": "Site Handlers",
+            "pages": [
+              "api/base-handler",
+              "api/site-handlers"
+            ]
+          },
+          {
+            "group": "Web Server",
+            "pages": [
+              "api/fastapi-endpoints",
+              "api/websocket"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Multi-site manga scraping with support for 6 popular manga sites",
+    "Modular architecture using Strategy Pattern for easy site handler extension",
+    "Asynchronous I/O with asyncio and aiohttp for high-performance concurrent downloads",
+    "Modern Next.js 15 dashboard with real-time WebSocket progress updates",
+    "Multiple deployment options: web app, desktop GUI, and Discord bot",
+    "Security features: SSRF protection, path traversal prevention, and CORS enforcement",
+    "Automated PDF generation with image conversion and compression",
+    "Docker support for production deployment"
+  ],
+  "publicApiSurface": [
+    "core.process_entry(url, log_callback, check_cancel, progress_callback)",
+    "core.handler.process_entry()",
+    "core.sites.BaseSiteHandler",
+    "core.sites.TMOHandler",
+    "core.sites.M440Handler",
+    "core.sites.H2RHandler",
+    "core.sites.HitomiHandler",
+    "core.sites.NHentaiHandler",
+    "core.sites.ZonaTMOHandler",
+    "core.utils.download_image()",
+    "core.utils.create_pdf()",
+    "core.utils.download_and_make_pdf()",
+    "FastAPI GET /pdfs/{filename}",
+    "FastAPI WebSocket /ws"
+  ]
+}
