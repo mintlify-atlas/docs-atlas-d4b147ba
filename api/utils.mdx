@@ -1,0 +1,378 @@
+---
+title: Utils module
+description: Shared utilities for file management, image downloading, and PDF compilation
+---
+
+The `utils` module provides essential utility functions for the manga downloader, including filename sanitization, asynchronous image downloading, and PDF generation.
+
+## clean_filename()
+
+Sanitizes strings to create valid file or directory names compatible with Windows and Linux.
+
+```python
+def clean_filename(text: str) -> str
+```
+
+### Parameters
+
+<ParamField path="text" type="str" required>
+  The raw title string to be sanitized.
+</ParamField>
+
+### Returns
+
+<ResponseField name="return" type="str">
+  A safe filename string with HTML tags stripped and reserved characters removed. Returns `"untitled"` if the input is empty or results in an empty string after sanitization.
+</ResponseField>
+
+### Behavior
+
+- Strips HTML tags using regex pattern `<[^>]+>`
+- Removes reserved characters: `\ / * ? : " < > |`
+- Trims leading and trailing whitespace
+- Returns `"untitled"` as fallback for empty inputs
+
+### Usage example
+
+```python
+from core.utils import clean_filename
+
+# Basic sanitization
+title = clean_filename("My Manga: Chapter 1")
+print(title)  # Output: "My Manga Chapter 1"
+
+# HTML tag removal
+title = clean_filename("<div>Manga Title</div>")
+print(title)  # Output: "Manga Title"
+
+# Empty input handling
+title = clean_filename("")
+print(title)  # Output: "untitled"
+```
+
+## download_image()
+
+Downloads a single image asynchronously and saves it to a local directory with proper ordering.
+
+```python
+async def download_image(
+    session: aiohttp.ClientSession,
+    url: str,
+    folder: str,
+    index: int,
+    log_callback: Callable[[str], None],
+    headers: dict
+) -> Optional[str]
+```
+
+### Parameters
+
+<ParamField path="session" type="aiohttp.ClientSession" required>
+  The active asynchronous HTTP session for making requests.
+</ParamField>
+
+<ParamField path="url" type="str" required>
+  The direct image URL to download.
+</ParamField>
+
+<ParamField path="folder" type="str" required>
+  The local directory path to save the image (typically a temporary folder).
+</ParamField>
+
+<ParamField path="index" type="int" required>
+  The page order index used for filename generation. Ensures correct sorting in PDF creation.
+</ParamField>
+
+<ParamField path="log_callback" type="Callable[[str], None]" required>
+  Callback function to send error messages and logs to the frontend.
+</ParamField>
+
+<ParamField path="headers" type="dict" required>
+  HTTP headers to bypass bot protections (Cloudflare, User-Agent, Referer, etc.).
+</ParamField>
+
+### Returns
+
+<ResponseField name="return" type="Optional[str]">
+  The absolute path to the downloaded image file if successful, otherwise `None`.
+</ResponseField>
+
+### Behavior
+
+- Automatically detects file extension from URL (`.jpg`, `.png`, `.webp`, `.jpeg`, `.avif`)
+- Generates zero-padded filenames (e.g., `001.jpg`, `042.png`)
+- Downloads with provided headers to bypass protections
+- Logs errors through callback on failure
+
+### Usage example
+
+```python
+import aiohttp
+from core.utils import download_image
+from core.config import HEADERS_TMO
+
+async def download_pages():
+    async with aiohttp.ClientSession() as session:
+        path = await download_image(
+            session=session,
+            url="https://example.com/page1.jpg",
+            folder="/path/to/temp",
+            index=1,
+            log_callback=print,
+            headers=HEADERS_TMO
+        )
+        if path:
+            print(f"Downloaded: {path}")
+```
+
+## create_pdf()
+
+Compiles a list of image paths into a single PDF file using `img2pdf` (preferred) or Pillow (fallback).
+
+```python
+def create_pdf(
+    image_paths: List[str],
+    output_pdf: str,
+    log_callback: Callable[[str], None]
+) -> bool
+```
+
+### Parameters
+
+<ParamField path="image_paths" type="List[str]" required>
+  List of absolute file paths to images to be compiled into the PDF.
+</ParamField>
+
+<ParamField path="output_pdf" type="str" required>
+  Absolute path where the generated PDF should be saved.
+</ParamField>
+
+<ParamField path="log_callback" type="Callable[[str], None]" required>
+  Callback function to emit log messages about the PDF generation process.
+</ParamField>
+
+### Returns
+
+<ResponseField name="return" type="bool">
+  `True` if PDF generation succeeded, `False` if it failed.
+</ResponseField>
+
+### Behavior
+
+- **Image conversion**: Automatically converts RGBA, LA, and transparent images to RGB/JPEG
+- **Primary method**: Uses `img2pdf` library for lossless PDF generation
+- **Fallback method**: Uses Pillow if `img2pdf` fails or is unavailable
+- **Error handling**: Logs detailed error messages through callback
+- **Path logging**: Displays relative path from PDF folder for cleaner logs
+
+### Usage example
+
+```python
+from core.utils import create_pdf
+
+image_files = [
+    "/temp/001.jpg",
+    "/temp/002.png",
+    "/temp/003.webp"
+]
+
+success = create_pdf(
+    image_paths=image_files,
+    output_pdf="/output/manga_chapter1.pdf",
+    log_callback=print
+)
+
+if success:
+    print("PDF created successfully")
+```
+
+## finalize_pdf_flow()
+
+Orchestrates the final steps of PDF creation: generates the PDF, optionally opens it, and cleans up temporary files.
+
+```python
+def finalize_pdf_flow(
+    image_paths: List[str],
+    pdf_name: str,
+    log_callback: Callable[[str], None],
+    temp_dir: Optional[str] = None,
+    open_result: bool = True
+)
+```
+
+### Parameters
+
+<ParamField path="image_paths" type="List[str]" required>
+  List of downloaded image file paths to compile.
+</ParamField>
+
+<ParamField path="pdf_name" type="str" required>
+  Filename for the output PDF (not a full path, just the filename).
+</ParamField>
+
+<ParamField path="log_callback" type="Callable[[str], None]" required>
+  Callback function to emit status messages.
+</ParamField>
+
+<ParamField path="temp_dir" type="Optional[str]">
+  Optional path to temporary directory to delete after PDF creation.
+</ParamField>
+
+<ParamField path="open_result" type="bool" default="True">
+  Whether to automatically open the PDF file and its folder after creation (Windows only).
+</ParamField>
+
+### Returns
+
+This function does not return a value.
+
+### Behavior
+
+1. Creates PDF folder if it doesn't exist
+2. Generates PDF using `create_pdf()`
+3. Opens PDF folder and file if `open_result=True` (Windows only via `os.startfile()`)
+4. Deletes temporary directory if provided
+5. Logs completion status
+
+### Usage example
+
+```python
+from core.utils import finalize_pdf_flow
+
+finalize_pdf_flow(
+    image_paths=downloaded_images,
+    pdf_name="My_Manga_Chapter_1.pdf",
+    log_callback=print,
+    temp_dir="/temp/manga_download",
+    open_result=True
+)
+```
+
+## download_and_make_pdf()
+
+Main orchestration function that handles the complete workflow: downloads images in batches, creates PDF, and cleans up.
+
+```python
+async def download_and_make_pdf(
+    image_urls: List[str],
+    output_name: str,
+    headers: dict,
+    log_callback: Callable[[str], None],
+    check_cancel: Callable[[], bool],
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+    is_path: bool = False,
+    open_result: bool = True
+) -> None
+```
+
+### Parameters
+
+<ParamField path="image_urls" type="List[str]" required>
+  List of image URLs to download and compile into PDF.
+</ParamField>
+
+<ParamField path="output_name" type="str" required>
+  Output filename (or full path if `is_path=True`).
+</ParamField>
+
+<ParamField path="headers" type="dict" required>
+  HTTP headers for image download requests.
+</ParamField>
+
+<ParamField path="log_callback" type="Callable[[str], None]" required>
+  Callback function for log messages.
+</ParamField>
+
+<ParamField path="check_cancel" type="Callable[[], bool]" required>
+  Function that returns `True` if the user cancelled the operation.
+</ParamField>
+
+<ParamField path="progress_callback" type="Optional[Callable[[int, int], None]]">
+  Optional callback for progress updates with `(current, total)` parameters.
+</ParamField>
+
+<ParamField path="is_path" type="bool" default="False">
+  If `True`, treats `output_name` as a full path instead of just a filename.
+</ParamField>
+
+<ParamField path="open_result" type="bool" default="True">
+  Whether to automatically open the PDF after creation.
+</ParamField>
+
+### Returns
+
+This function does not return a value.
+
+### Behavior
+
+1. **Temp folder setup**: Creates/cleans temporary download folder
+2. **Batch downloading**: Downloads images in chunks defined by `BATCH_SIZE`
+3. **Cancellation check**: Checks for user cancellation between batches
+4. **Progress updates**: Calls progress callback after each batch
+5. **PDF creation**: Compiles downloaded images into PDF
+6. **Cleanup**: Removes temporary folder
+7. **Completion logging**: Emits `[DONE] Finished.` message
+
+### Usage example
+
+```python
+from core.utils import download_and_make_pdf
+from core.config import HEADERS_TMO
+
+image_urls = [
+    "https://example.com/page1.jpg",
+    "https://example.com/page2.jpg",
+    "https://example.com/page3.jpg"
+]
+
+def log(msg):
+    print(msg)
+
+def check_cancelled():
+    return False  # Check your cancellation state
+
+def update_progress(current, total):
+    print(f"Downloaded {current}/{total} images")
+
+await download_and_make_pdf(
+    image_urls=image_urls,
+    output_name="manga_chapter.pdf",
+    headers=HEADERS_TMO,
+    log_callback=log,
+    check_cancel=check_cancelled,
+    progress_callback=update_progress,
+    open_result=True
+)
+```
+
+## Complete workflow example
+
+Here's how the utility functions work together in a typical download scenario:
+
+```python
+import asyncio
+from core.utils import clean_filename, download_and_make_pdf
+from core.config import HEADERS_TMO, OPEN_RESULT_ON_FINISH
+
+async def download_manga_chapter(raw_title: str, image_urls: list):
+    # Sanitize the title for use as filename
+    safe_title = clean_filename(raw_title)
+    pdf_filename = f"{safe_title}.pdf"
+    
+    # Download all images and create PDF
+    await download_and_make_pdf(
+        image_urls=image_urls,
+        output_name=pdf_filename,
+        headers=HEADERS_TMO,
+        log_callback=print,
+        check_cancel=lambda: False,
+        progress_callback=lambda c, t: print(f"{c}/{t}"),
+        open_result=OPEN_RESULT_ON_FINISH
+    )
+
+# Run the download
+await download_manga_chapter(
+    raw_title="<div>My Manga: Chapter 1</div>",
+    image_urls=[...]  # List of image URLs
+)
+```

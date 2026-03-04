@@ -1,0 +1,325 @@
+---
+title: ZonaTMO
+description: Site handler for zonatmo.com using Crawl4AI with cascade view and LLM extraction
+---
+
+The ZonaTMO handler is one of the most sophisticated extractors in the project, supporting both single chapters and full series downloads using AI-powered image detection.
+
+## Supported URLs
+
+The handler recognizes two URL patterns:
+
+### Single chapter
+```
+https://zonatmo.com/view_uploads/[chapter-id]
+https://zonatmo.com/viewer/[chapter-id]
+https://zonatmo.com/viewer/[chapter-id]/paginated
+```
+
+### Full series (cover page)
+```
+https://zonatmo.com/library/manga/[series-name]
+```
+
+<Note>
+The handler automatically detects which type of URL you provide and adjusts its extraction strategy accordingly.
+</Note>
+
+## Extraction technology
+
+### Crawl4AI with Gemini LLM
+
+ZonaTMO uses **Crawl4AI** with **Google Gemini 1.5 Flash** for intelligent image extraction:
+
+```python
+llm_config = LLMConfig(
+    provider="gemini/gemini-1.5-flash", 
+    api_token=config.GOOGLE_API_KEY
+)
+
+instruction = """Extract all image URLs. Look for 'data-original' 
+and 'src'. Return JSON {'images': ['url1'...]}."""
+
+llm_strategy = LLMExtractionStrategy(
+    llm_config=llm_config, 
+    instruction=instruction
+)
+```
+
+Location: `~/workspace/source/core/sites/zonatmo.py:153-155`
+
+### Cascade view optimization
+
+The handler converts paginated URLs to cascade view for more efficient extraction:
+
+```python
+if "/paginated" in final_url:
+    target_url = final_url.replace("/paginated", "/cascade")
+elif "/viewer/" in final_url:
+    if not final_url.endswith("/cascade"):
+        target_url = final_url + "/cascade"
+```
+
+Location: `~/workspace/source/core/sites/zonatmo.py:139-142`
+
+Cascade view loads all images on a single scrollable page, making extraction faster and more reliable.
+
+## Lazy loading handling
+
+ZonaTMO pages use lazy loading for images. The handler executes JavaScript to trigger loading:
+
+```javascript
+(async () => {
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    window.scrollTo(0, 0);
+    let totalHeight = 0; 
+    let distance = 1000;
+    while(totalHeight < document.body.scrollHeight) { 
+        window.scrollBy(0, distance); 
+        totalHeight += distance; 
+        await sleep(200); 
+    }
+    await sleep(1000);
+})();
+```
+
+Location: `~/workspace/source/core/sites/zonatmo.py:157-165`
+
+This script:
+1. Scrolls to the top of the page
+2. Gradually scrolls down in 1000px increments
+3. Waits 200ms between scrolls to trigger lazy loading
+4. Waits 1 second after reaching the bottom
+
+## Full series extraction
+
+When you provide a cover/library URL, the handler:
+
+1. **Crawls the series page** to find all chapter links
+2. **Extracts the manga title** from `<h1>` tags
+3. **Creates a folder** named after the series
+4. **Downloads each chapter** as a separate PDF
+5. **Reverses chapter order** (oldest to newest)
+
+```python
+links = re.findall(
+    r'href=["\']https://zonatmo.com/view_uploads/[^"\']+)["\']', 
+    result.html
+)
+
+# Remove duplicates while preserving order
+clean_links = []
+seen = set()
+for l in links:
+    if l not in seen:
+        clean_links.append(l)
+        seen.add(l)
+
+clean_links.reverse()  # Oldest first
+```
+
+Location: `~/workspace/source/core/sites/zonatmo.py:49-56,90`
+
+### Title extraction
+
+The handler tries multiple methods to extract the manga title:
+
+1. **H1 element** with class `element-title` (preferred)
+2. **Page title tag** as fallback
+3. **Default**: `"Manga_ZonaTMO"` if nothing found
+
+```python
+h1_match = re.search(
+    r'<h1[^>]*class=["\'].*?element-title.*?["\'][^>]*>(.*?)</h1>', 
+    result.html, 
+    re.IGNORECASE | re.DOTALL
+)
+
+if h1_match: 
+    raw_html = h1_match.group(1)
+    # Remove <small> tags
+    raw_html = re.sub(r'<small[^>]*>.*?</small>', '', raw_html, flags=re.IGNORECASE | re.DOTALL)
+    manga_title = clean_filename(raw_html)
+```
+
+Location: `~/workspace/source/core/sites/zonatmo.py:66-74`
+
+## Fallback extraction
+
+If LLM extraction fails, the handler uses regex fallback:
+
+```python
+if not image_urls and result.html:
+    matches = re.findall(
+        r'(https?://(?:img1?\.?tmo\.com|otakuteca\.com|img1tmo\.com)[^"\'\s]+\.(?:webp|jpg|png))', 
+        result.html
+    )
+    if matches: 
+        image_urls = sorted(list(set(matches)))
+```
+
+Location: `~/workspace/source/core/sites/zonatmo.py:185-187`
+
+### Image filtering
+
+The handler filters out non-content images:
+
+```python
+image_urls = [
+    u for u in image_urls 
+    if "cover" not in u 
+    and "avatar" not in u 
+    and "banner" not in u
+]
+```
+
+Location: `~/workspace/source/core/sites/zonatmo.py:189`
+
+## Headers and configuration
+
+ZonaTMO requires specific headers defined in `config.py`:
+
+```python
+HEADERS_ZONATMO = {
+    "User-Agent": "Mozilla/5.0 ...",
+    "Referer": "https://zonatmo.com/"
+}
+```
+
+These headers are passed to `download_and_make_pdf` for image downloads.
+
+## Usage examples
+
+### Single chapter
+
+```python
+from core.handler import process_url
+
+await process_url(
+    "https://zonatmo.com/view_uploads/123456",
+    log_callback=print,
+    check_cancel=lambda: False,
+    progress_callback=lambda current, total: print(f"{current}/{total}")
+)
+```
+
+Output: `PDF/zonatmo_chapter.pdf` (or auto-detected title)
+
+### Full series
+
+```python
+await process_url(
+    "https://zonatmo.com/library/manga/my-favorite-manga",
+    log_callback=print,
+    check_cancel=lambda: False,
+    progress_callback=lambda current, total: print(f"Chapter {current}/{total}")
+)
+```
+
+Output:
+```
+PDF/
+└── My Favorite Manga/
+    ├── My Favorite Manga - 001.pdf
+    ├── My Favorite Manga - 002.pdf
+    └── My Favorite Manga - 003.pdf
+```
+
+### Web interface
+
+You can also use the web version:
+
+1. Start the server: `START_WEB_VERSION.bat`
+2. Navigate to http://localhost:3000
+3. Paste any ZonaTMO URL
+4. Watch real-time logs and progress bars
+
+## Rate limiting
+
+The handler includes a 1-second delay between chapters to avoid rate limiting:
+
+```python
+for i, chap_url in enumerate(clean_links):
+    await self._process_chapter(chap_url, ...)
+    await asyncio.sleep(1)  # Polite delay
+```
+
+Location: `~/workspace/source/core/sites/zonatmo.py:105-106`
+
+## Known limitations
+
+<Warning>
+**Requires Google API key**: The LLM extraction will fail without `GOOGLE_API_KEY` in your `.env` file. Regex fallback may not catch all images.
+</Warning>
+
+### URL resolution
+
+The handler attempts to resolve redirects before extraction:
+
+```python
+async with aiohttp.ClientSession() as session:
+    async with session.get(url, headers=config.HEADERS_ZONATMO) as resp:
+        if resp.status == 200:
+            final_url = str(resp.url)
+```
+
+Location: `~/workspace/source/core/sites/zonatmo.py:134-137`
+
+If this fails, it uses the original URL with a warning.
+
+### Duplicate detection
+
+Chapter lists may contain duplicate URLs. The handler deduplicates using a set:
+
+```python
+clean_links = []
+seen = set()
+for l in links:
+    if l not in seen:
+        clean_links.append(l)
+        seen.add(l)
+```
+
+Location: `~/workspace/source/core/sites/zonatmo.py:51-56`
+
+## Implementation details
+
+### Class structure
+
+```python
+class ZonaTMOHandler(BaseSiteHandler):
+    @staticmethod
+    def get_supported_domains() -> list:
+        return ["zonatmo.com"]
+    
+    async def process(self, url, log_callback, check_cancel, progress_callback):
+        # Main processing logic
+        ...
+    
+    async def _process_chapter(self, url, output_name, ...):
+        # Chapter-specific extraction
+        ...
+```
+
+Location: `~/workspace/source/core/sites/zonatmo.py:20-214`
+
+### Domain matching
+
+The handler is automatically selected by the routing logic in `handler.py` when the URL contains `"zonatmo.com"`.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="TMO-H" icon="wand-magic-sparkles" href="/sites/tmo">
+    Similar AI-powered extraction for TMO-H
+  </Card>
+  <Card title="Configuration" icon="gear" href="/api/config">
+    Set up your Google API key
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/concepts/architecture">
+    Learn about the Strategy Pattern
+  </Card>
+  <Card title="Utils" icon="wrench" href="/api/utils">
+    Explore download_and_make_pdf function
+  </Card>
+</CardGroup>

@@ -1,0 +1,415 @@
+---
+title: Site handlers
+description: Implementation details for all supported manga and doujinshi websites
+---
+
+## Overview
+
+The Universal Manga Downloader includes six built-in site handlers, each implementing the `BaseSiteHandler` interface. Each handler uses different technologies and strategies optimized for its target website.
+
+## Handler implementations
+
+<AccordionGroup>
+  <Accordion title="TMOHandler - TMOHentai" icon="book">
+    
+### TMOHandler
+
+Handles downloads from TMOHentai websites using AI-powered extraction.
+
+**Source:** `core/sites/tmo.py:18`
+
+**Supported domains:**
+- `tmohentai`
+
+**Technology stack:**
+- Crawl4AI for web crawling
+- Google Gemini AI (gemini-1.5-flash) for intelligent image extraction
+- JavaScript execution for lazy-loading
+
+**Key features:**
+- Automatically converts URLs to cascade view for easier extraction
+- Uses AI to intelligently extract image URLs from complex page structures
+- Falls back to regex extraction if AI fails
+- Handles lazy-loaded images with custom JavaScript
+
+**Code example:**
+
+```python
+class TMOHandler(BaseSiteHandler):
+    @staticmethod
+    def get_supported_domains() -> list:
+        return ["tmohentai"]
+    
+    async def process(self, url, log_callback, check_cancel, progress_callback=None):
+        # Convert to cascade view
+        if "/contents/" in url:
+            target_url = url.replace("/contents/", "/reader/") + "/cascade"
+        
+        # Configure AI extraction
+        llm_config = LLMConfig(
+            provider="gemini/gemini-1.5-flash", 
+            api_token=config.GOOGLE_API_KEY
+        )
+        instruction = "Extract all image URLs. Look for 'data-original' and 'src'."
+        llm_strategy = LLMExtractionStrategy(llm_config=llm_config, instruction=instruction)
+        
+        # Crawl with AI extraction
+        async with AsyncWebCrawler(verbose=True) as crawler:
+            result = await crawler.arun(
+                target_url,
+                extraction_strategy=llm_strategy,
+                js_code=js_lazy_load
+            )
+```
+
+**Source:** `core/sites/tmo.py:25-74`
+
+<Note>
+  Requires `GOOGLE_API_KEY` to be configured for AI extraction. See [Configuration](/api/config).
+</Note>
+
+  </Accordion>
+
+  <Accordion title="ZonaTMOHandler - ZonaTMO" icon="book-open">
+    
+### ZonaTMOHandler
+
+Handles downloads from ZonaTMO with support for both single chapters and full manga series.
+
+**Source:** `core/sites/zonatmo.py:20`
+
+**Supported domains:**
+- `zonatmo.com`
+
+**Technology stack:**
+- Crawl4AI with AI extraction
+- Google Gemini AI for image URL extraction
+- aiohttp for URL resolution
+- JavaScript for lazy-loading
+
+**Key features:**
+- Detects cover pages and automatically downloads all chapters
+- Resolves redirects and converts to cascade view
+- Extracts manga title from multiple fallback locations
+- Creates organized folder structure for multi-chapter downloads
+- Skips already downloaded chapters
+
+**Code example:**
+
+```python
+class ZonaTMOHandler(BaseSiteHandler):
+    @staticmethod
+    def get_supported_domains() -> list:
+        return ["zonatmo.com"]
+    
+    async def process(self, url, log_callback, check_cancel, progress_callback=None):
+        # Detect cover page
+        if "/library/manga/" in url:
+            log_callback("[INFO] Cover detected. Searching for chapters...")
+            
+            # Extract chapters
+            links = re.findall(
+                r'href=["\']([^"\']*/view_uploads/[^"\']*)["\']", 
+                result.html
+            )
+            
+            # Download each chapter
+            for i, chap_url in enumerate(clean_links):
+                if check_cancel(): break
+                await self._process_chapter(chap_url, full_pdf_path, ...)
+```
+
+**Source:** `core/sites/zonatmo.py:27-213`
+
+  </Accordion>
+
+  <Accordion title="M440Handler - M440/Mangas.in" icon="book-bookmark">
+    
+### M440Handler
+
+Handles downloads from M440.in and Mangas.in websites.
+
+**Source:** `core/sites/m440.py:15`
+
+**Supported domains:**
+- `m440.in`
+- `mangas.in`
+
+**Technology stack:**
+- Crawl4AI for web crawling
+- Regex extraction
+
+**Key features:**
+- Detects cover pages vs. single chapters automatically
+- Extracts images from `data-src` attributes
+- Creates organized folder structure for series downloads
+- Simple and efficient regex-based extraction
+
+**Code example:**
+
+```python
+class M440Handler(BaseSiteHandler):
+    @staticmethod
+    def get_supported_domains() -> list:
+        return ["m440.in", "mangas.in"]
+    
+    async def process(self, url, log_callback, check_cancel, progress_callback=None):
+        # Detect cover page
+        clean_url = url.split("?")[0].rstrip("/")
+        is_cover_page = bool(re.search(r'/manga/[^/]+$', clean_url))
+        
+        if is_cover_page:
+            # Extract and download all chapters
+            links = re.findall(
+                r'href=["\']([^"\']*/manga/[^/]+/[^"\']*)["\']",
+                html
+            )
+```
+
+**Source:** `core/sites/m440.py:22-144`
+
+  </Accordion>
+
+  <Accordion title="H2RHandler - Hentai2Read" icon="book-open-reader">
+    
+### H2RHandler
+
+Handles downloads from Hentai2Read by extracting embedded gallery metadata.
+
+**Source:** `core/sites/h2r.py:14`
+
+**Supported domains:**
+- `hentai2read`
+
+**Technology stack:**
+- Crawl4AI for web crawling
+- JavaScript variable extraction
+- JSON parsing
+
+**Key features:**
+- Extracts image URLs from embedded `gData` JavaScript variable
+- Automatically detects CDN base URL
+- Single-chapter focused design
+- Fast and efficient (no AI required)
+
+**Code example:**
+
+```python
+class H2RHandler(BaseSiteHandler):
+    @staticmethod
+    def get_supported_domains() -> list:
+        return ["hentai2read"]
+    
+    async def process(self, url, log_callback, check_cancel, progress_callback=None):
+        # Extract gData JavaScript variable
+        gdata_match = re.search(r'var gData\s*=\s*(\{.*?\});', html, re.DOTALL)
+        
+        if gdata_match:
+            # Parse image list from JSON
+            images_match = re.search(
+                r'[\'"images[\'"\s*:\s*\[(.*?)\]', 
+                json_str
+            )
+            
+            # Construct full URLs
+            base_url = "https://static.hentai.direct/hentai"
+            image_urls = [f"{base_url}{p}" for p in paths]
+```
+
+**Source:** `core/sites/h2r.py:21-79`
+
+  </Accordion>
+
+  <Accordion title="HitomiHandler - Hitomi.la" icon="browser">
+    
+### HitomiHandler
+
+Handles downloads from Hitomi.la using browser automation to simulate real user behavior.
+
+**Source:** `core/sites/hitomi.py:16`
+
+**Supported domains:**
+- `hitomi.la`
+
+**Technology stack:**
+- Playwright for browser automation
+- Chromium browser in visible mode
+- Page-by-page image extraction
+
+**Key features:**
+- Launches real browser to bypass anti-bot measures
+- Navigates through reader page-by-page like a human
+- Extracts high-quality images with proper referer headers
+- Downloads images using authenticated browser context
+- Supports cancellation during long downloads
+
+**Code example:**
+
+```python
+class HitomiHandler(BaseSiteHandler):
+    @staticmethod
+    def get_supported_domains() -> list:
+        return ["hitomi.la"]
+    
+    async def process(self, url, log_callback, check_cancel, progress_callback=None):
+        async with async_playwright() as p:
+            # Launch visible browser
+            browser = await p.chromium.launch(
+                headless=False,
+                args=["--no-sandbox", "--start-maximized"]
+            )
+            
+            page = await context.new_page()
+            
+            # Navigate through each page
+            for i in range(1, total_images + 1):
+                await page.evaluate(f"location.hash = '#{i}'")
+                
+                # Wait for image to load
+                await page.wait_for_function(
+                    """(selector) => {
+                        const img = document.querySelector(selector);
+                        return img && img.src;
+                    }"""
+                )
+```
+
+**Source:** `core/sites/hitomi.py:23-174`
+
+<Warning>
+  Runs in visible browser mode by default to avoid detection. May be slower than other handlers.
+</Warning>
+
+  </Accordion>
+
+  <Accordion title="NHentaiHandler - nhentai.net" icon="server">
+    
+### NHentaiHandler
+
+Handles downloads from nhentai.net using the site's API endpoint.
+
+**Source:** `core/sites/nhentai.py:17`
+
+**Supported domains:**
+- `nhentai.net`
+
+**Technology stack:**
+- Playwright for API access
+- JSON API parsing
+- Direct CDN downloads
+
+**Key features:**
+- Uses official nhentai API for metadata
+- Constructs CDN URLs directly from API response
+- Maps file type codes to extensions (`j` → jpg, `p` → png, `w` → webp)
+- Fast and reliable (no scraping required)
+
+**Code example:**
+
+```python
+class NHentaiHandler(BaseSiteHandler):
+    @staticmethod
+    def get_supported_domains() -> list:
+        return ["nhentai.net"]
+    
+    async def process(self, url, log_callback, check_cancel, progress_callback=None):
+        # Extract gallery ID
+        id_match = re.search(r'nhentai\\.net/g/(\d+)', url)
+        gallery_id = id_match.group(1)
+        
+        # Fetch API data
+        api_url = f"https://nhentai.net/api/gallery/{gallery_id}"
+        
+        async with async_playwright() as p:
+            page = await context.new_page()
+            await page.goto(api_url)
+            content = await page.inner_text("body")
+            data = json.loads(content)
+            
+            # Build image URLs
+            media_id = data.get("media_id")
+            for idx, img in enumerate(data["images"]["pages"]):
+                ext = ext_map.get(img.get('t'), 'jpg')
+                url = f"https://i.nhentai.net/galleries/{media_id}/{idx+1}.{ext}"
+```
+
+**Source:** `core/sites/nhentai.py:24-121`
+
+  </Accordion>
+</AccordionGroup>
+
+## Technology comparison
+
+| Handler | Technology | AI Required | Multi-Chapter | Browser Mode |
+|---------|-----------|-------------|---------------|---------------|
+| TMOHandler | Crawl4AI + Gemini | Yes | No | No |
+| ZonaTMOHandler | Crawl4AI + Gemini | Yes | Yes | No |
+| M440Handler | Crawl4AI | No | Yes | No |
+| H2RHandler | Crawl4AI | No | No | No |
+| HitomiHandler | Playwright | No | No | Yes (visible) |
+| NHentaiHandler | Playwright + API | No | No | Yes (headless) |
+
+## Key differences
+
+### AI-powered extraction
+
+**TMOHandler** and **ZonaTMOHandler** use Google Gemini AI to intelligently extract image URLs from complex, dynamically-loaded pages. This approach is more robust but requires an API key.
+
+```python
+llm_config = LLMConfig(provider="gemini/gemini-1.5-flash", api_token=config.GOOGLE_API_KEY)
+instruction = "Extract all image URLs. Look for 'data-original' and 'src'."
+llm_strategy = LLMExtractionStrategy(llm_config=llm_config, instruction=instruction)
+```
+
+### Browser automation
+
+**HitomiHandler** and **NHentaiHandler** use Playwright to control a real browser. This is necessary for sites with strong anti-bot protection or when accessing APIs that require browser context.
+
+```python
+async with async_playwright() as p:
+    browser = await p.chromium.launch(headless=is_headless)
+    context = await browser.new_context(user_agent=config.USER_AGENT)
+    page = await context.new_page()
+```
+
+### Multi-chapter support
+
+**ZonaTMOHandler** and **M440Handler** automatically detect cover pages and download entire manga series:
+
+```python
+if "/library/manga/" in url:
+    # Extract all chapter links
+    links = re.findall(r'href=["\']([^"\']*/view_uploads/[^"\']*)["\']", html)
+    
+    # Download each chapter to organized folder
+    for i, chap_url in enumerate(clean_links):
+        pdf_name = f"{manga_title} - {i+1:03d}.pdf"
+        await self._process_chapter(chap_url, pdf_name, ...)
+```
+
+### Simple regex extraction
+
+**M440Handler** and **H2RHandler** use straightforward regex patterns for fast, reliable extraction on sites with predictable HTML structure:
+
+```python
+# Extract from data-src attributes
+matches = re.findall(r'data-src=["\']([^"\']*)["\']", html)
+
+# Extract from JavaScript variable
+gdata_match = re.search(r'var gData\s*=\s*(\{.*?\});', html, re.DOTALL)
+```
+
+## Creating custom handlers
+
+To add support for a new website, create a new handler class that extends `BaseSiteHandler`. See the [BaseSiteHandler](/api/base-handler) documentation for a complete implementation guide.
+
+## See also
+
+<CardGroup cols={2}>
+  <Card title="BaseSiteHandler" icon="code" href="/api/base-handler">
+    Learn how to create custom handlers
+  </Card>
+  <Card title="Configuration" icon="gear" href="/getting-started/configuration">
+    Configure API keys and settings
+  </Card>
+</CardGroup>

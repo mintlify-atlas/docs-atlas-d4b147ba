@@ -1,0 +1,92 @@
+---
+title: FastAPI endpoints
+description: HTTP endpoints for serving PDF files and static assets
+---
+
+The web server provides HTTP endpoints for accessing generated manga PDFs. The server runs on port 8000 by default and includes security features like CORS protection and path traversal prevention.
+
+## Base URL
+
+```
+http://localhost:8000
+```
+
+## PDF file delivery
+
+<RequestExample>
+```bash cURL
+curl http://localhost:8000/pdfs/my-manga.pdf
+```
+</RequestExample>
+
+<ParamField path="filename" type="string" required>
+  The filename of the PDF to retrieve. Supports URL-encoded paths.
+</ParamField>
+
+### Response
+
+Returns the PDF file with appropriate headers for inline viewing in browsers.
+
+<ResponseField name="Content-Type" type="string">
+  Set to `application/pdf`
+</ResponseField>
+
+<ResponseField name="Content-Disposition" type="string">
+  Set to `inline` to display PDFs in the browser
+</ResponseField>
+
+### Error responses
+
+<ResponseExample>
+```json File not found
+{
+  "error": "File not found."
+}
+```
+</ResponseExample>
+
+<ResponseExample>
+```json Path traversal attempt
+{
+  "error": "Invalid file path requested."
+}
+```
+</ResponseExample>
+
+## Security features
+
+### Path traversal prevention
+
+The endpoint protects against Local File Inclusion (LFI) attacks by:
+
+1. URL-decoding the filename parameter
+2. Resolving the absolute path of the requested file
+3. Verifying the resolved path starts with the PDF directory
+4. Blocking requests that attempt to access files outside the PDF folder
+
+Path traversal attempts like `../../etc/passwd` are automatically blocked and logged.
+
+### CORS configuration
+
+The server restricts cross-origin requests to prevent malicious websites from accessing your local server:
+
+**Allowed origins:**
+- `http://localhost:3000`
+- `http://localhost:5173`
+- `http://127.0.0.1:3000`
+- `http://127.0.0.1:5173`
+
+**Allowed methods:**
+- GET
+- POST
+- OPTIONS
+
+**Credentials:** Enabled for allowed origins only
+
+<Warning>
+The server intentionally does NOT use `allow_origins=["*"]` with `allow_credentials=True`, as this would allow any malicious website to connect to your local server.
+</Warning>
+
+## PDF storage location
+
+PDFs are stored in the `PDF` directory within the current working directory. The directory is created automatically if it doesn't exist.

@@ -1,0 +1,508 @@
+---
+title: Discord bot deployment
+description: Deploy the Universal Manga Downloader as a Discord bot with automatic file uploads
+---
+
+The Discord bot integration allows users to download manga directly through Discord commands with live progress updates and automatic file delivery.
+
+## Overview
+
+The bot (`bot.py`) provides:
+- Command-based manga downloads (`!descargar <url>`)
+- Real-time progress updates via Discord embeds
+- Automatic file uploads (direct for files under 8MB, GoFile for larger files)
+- Live-updating log messages
+
+## Prerequisites
+
+<Steps>
+  <Step title="Create a Discord bot">
+    1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
+    2. Click "New Application" and give it a name
+    3. Navigate to the "Bot" tab
+    4. Click "Add Bot"
+    5. Under "Token", click "Copy" to get your bot token
+  </Step>
+
+  <Step title="Enable privileged intents">
+    In the Bot settings, enable:
+    - **Message Content Intent** (required to read command messages)
+
+    <Warning>
+      Without the Message Content Intent, the bot cannot process commands.
+    </Warning>
+  </Step>
+
+  <Step title="Invite the bot to your server">
+    1. Go to the "OAuth2" → "URL Generator" tab
+    2. Select scopes: `bot`
+    3. Select permissions: `Send Messages`, `Attach Files`, `Embed Links`
+    4. Copy the generated URL and open it in your browser
+    5. Select your server and authorize
+  </Step>
+</Steps>
+
+## Configuration
+
+### Environment setup
+
+Create a `.env` file in the project root:
+
+```bash .env
+DISCORD_TOKEN=your_bot_token_here
+```
+
+<Note>
+  You can use `.env.example` as a template:
+  ```bash
+  cp .env.example .env
+  ```
+</Note>
+
+### Loading the token
+
+The bot loads the token using `python-dotenv`:
+
+```python bot.py:21-22
+load_dotenv()
+TOKEN = os.getenv('DISCORD_TOKEN')
+```
+
+## Installation
+
+<Steps>
+  <Step title="Install dependencies">
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+    Key dependencies:
+    - `discord.py` - Discord API wrapper
+    - `aiohttp` - Async HTTP client (for GoFile uploads)
+    - `python-dotenv` - Environment variable management
+  </Step>
+
+  <Step title="Verify Playwright installation">
+    ```bash
+    playwright install chromium
+    playwright install-deps
+    ```
+  </Step>
+
+  <Step title="Test configuration">
+    ```bash
+    python bot.py
+    ```
+
+    You should see:
+    ```
+    Bot connected as YourBotName#1234
+    ```
+  </Step>
+</Steps>
+
+## Running the bot
+
+### Development mode
+
+```bash
+python bot.py
+```
+
+### Production mode
+
+For production, use a process manager like `systemd` or `supervisord`:
+
+<CodeGroup>
+  ```ini systemd service
+  [Unit]
+  Description=Manga Downloader Discord Bot
+  After=network.target
+
+  [Service]
+  Type=simple
+  User=youruser
+  WorkingDirectory=/path/to/project
+  Environment="PATH=/path/to/venv/bin"
+  ExecStart=/path/to/venv/bin/python bot.py
+  Restart=always
+  RestartSec=10
+
+  [Install]
+  WantedBy=multi-user.target
+  ```
+
+  ```bash Start service
+  sudo systemctl start manga-bot
+  sudo systemctl enable manga-bot  # Auto-start on boot
+  ```
+</CodeGroup>
+
+<Tip>
+  Use a virtual environment in production to isolate dependencies:
+  ```bash
+  python -m venv venv
+  source venv/bin/activate  # Linux/Mac
+  venv\Scripts\activate     # Windows
+  ```
+</Tip>
+
+## Commands
+
+### !descargar
+
+Download a manga from a supported URL.
+
+**Usage:**
+```
+!descargar <url>
+```
+
+**Example:**
+```
+!descargar https://tmohentai.com/manga/example
+```
+
+```python bot.py:144-149
+@bot.command(name='descargar')
+async def descargar(ctx, url: str):
+    """
+    Downloads a manga from a supported URL.
+    Usage: !descargar <url>
+    """
+```
+
+## Features
+
+### Live-updating embeds
+
+The bot creates a Discord embed that updates in real-time with download progress:
+
+```python bot.py:46-48
+async def initialize(self):
+    embed = discord.Embed(title="[+] Starting download...", color=discord.Color.blue())
+    self.message = await self.ctx.send(embed=embed)
+```
+
+```python bot.py:100-112
+async def update_discord_message(self):
+    if not self.message: return
+    
+    log_text = "\n".join(self.logs)
+    log_text = f"```\n{log_text}\n```"
+    
+    embed = self.message.embeds[0]
+    embed.description = log_text
+    
+    try:
+        await self.message.edit(embed=embed)
+    except discord.errors.HTTPException:
+        pass
+```
+
+<Info>
+  The embed updates every 2 seconds or immediately when important events occur (completion/errors).
+</Info>
+
+### Automatic file uploads
+
+The bot intelligently handles file uploads based on size:
+
+```python bot.py:184-194
+if size_mb > 7.9: 
+    await ctx.send(f"[WARN] `{filename}` ({size_mb:.2f}MB) exceeds limit. Uploading to GoFile...")
+    
+    link = await upload_to_gofile(file_path)
+    if link:
+        await ctx.send(f"[SUCCESS] **{filename}**: {link}")
+    else:
+        await ctx.send(f"[ERROR] Failed to upload `{filename}` to GoFile.")
+else:
+    await ctx.send(file=discord.File(file_path))
+```
+
+<Warning>
+  Discord has an 8MB file size limit for non-Nitro users. Files exceeding this limit are automatically uploaded to GoFile.
+</Warning>
+
+### GoFile integration
+
+For large files, the bot uploads to GoFile and provides a download link:
+
+```python bot.py:114-138
+async def upload_to_gofile(file_path: str) -> Optional[str]:
+    """Uploads a file to GoFile and returns the download link."""
+    try:
+        async with aiohttp.ClientSession() as session:
+            # Get available server
+            async with session.get('https://api.gofile.io/servers') as resp:
+                if resp.status != 200: return None
+                data = await resp.json()
+                if data['status'] != 'ok': return None
+                
+                server = data['data']['servers'][0]['name']
+                upload_url = f'https://{server}.gofile.io/uploadFile'
+            
+            # Upload file
+            filename = os.path.basename(file_path)
+            with open(file_path, 'rb') as f:
+                form_data = aiohttp.FormData()
+                form_data.add_field('file', f, filename=filename, 
+                                    content_type='application/pdf')
+                
+                async with session.post(upload_url, data=form_data) as upload_resp:
+                    if upload_resp.status == 200:
+                        res = await upload_resp.json()
+                        if res['status'] == 'ok':
+                            return res['data']['downloadPage']
+```
+
+<Note>
+  GoFile provides free file hosting with no registration required. Links expire after 30 days of inactivity.
+</Note>
+
+## File detection
+
+The bot automatically detects generated PDFs from core logs:
+
+```python bot.py:57-89
+# Detect generated PDF from core logs
+# Format: [SUCCESS] PDF Generated: file.pdf
+match = re.search(r"\[SUCCESS\] PDF Generated: (.*)", text)
+if match:
+    filename = match.group(1).strip()
+    current_dir = os.getcwd() 
+    
+    if os.path.isabs(filename) and os.path.exists(filename):
+        self.generated_files.append(filename)
+        print(f"[BOT FILE DETECTED ABS] {filename}")
+    else:
+        pdf_root = os.path.join(current_dir, core.config.PDF_FOLDER_NAME)
+        found = False
+        
+        # Try direct path
+        direct_path = os.path.join(pdf_root, filename)
+        if os.path.exists(direct_path):
+            self.generated_files.append(direct_path)
+            found = True
+        
+        # Recursive search as fallback
+        if not found:
+            for root, dirs, files in os.walk(pdf_root):
+                if filename in files:
+                    full_path = os.path.join(root, filename)
+                    self.generated_files.append(full_path)
+                    found = True
+```
+
+## Bot configuration
+
+### Command prefix
+
+```python bot.py:30
+bot = commands.Bot(command_prefix='!', intents=intents)
+```
+
+Change the prefix by modifying `command_prefix='!'` to your preferred character.
+
+### Intents
+
+```python bot.py:27-28
+intents = discord.Intents.default()
+intents.message_content = True
+```
+
+<Warning>
+  The `message_content` intent is required for reading command messages. Ensure it's enabled in the Discord Developer Portal.
+</Warning>
+
+### Silent mode
+
+The bot disables automatic file opening:
+
+```python bot.py:25
+core.config.OPEN_RESULT_ON_FINISH = False
+```
+
+## Example workflow
+
+Here's what happens when a user runs `!descargar https://example.com/manga`:
+
+<Steps>
+  <Step title="Command received">
+    The bot receives the message and validates the URL.
+  </Step>
+
+  <Step title="Embed created">
+    An embed message is posted: "Starting download..."
+  </Step>
+
+  <Step title="Download begins">
+    Core processing starts with logging callbacks:
+    ```
+    [INFO] Fetching manga metadata...
+    [INFO] Found 30 pages
+    [INFO] Downloading page 1/30...
+    [INFO] Downloading page 2/30...
+    ...
+    ```
+  </Step>
+
+  <Step title="Embed updates">
+    The embed updates every 2 seconds with the latest logs.
+  </Step>
+
+  <Step title="PDF generated">
+    ```
+    [SUCCESS] PDF Generated: manga_chapter.pdf
+    ```
+    The embed turns green: "Download Finished"
+  </Step>
+
+  <Step title="File uploaded">
+    - **If under 8MB**: File is attached directly to a new message
+    - **If over 8MB**: File is uploaded to GoFile and a link is provided
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+### Bot doesn't respond to commands
+
+**Issue**: Message Content Intent not enabled
+
+**Solution**: 
+1. Go to Discord Developer Portal
+2. Select your application → Bot tab
+3. Enable "Message Content Intent"
+4. Restart the bot
+
+### "DISCORD_TOKEN not found" error
+
+**Issue**: `.env` file missing or incorrect
+
+**Solution**:
+```bash
+echo "DISCORD_TOKEN=your_actual_token" > .env
+```
+
+### Downloads work but files aren't uploaded
+
+**Issue**: PDF detection failing
+
+**Solution**: Check that:
+1. The `PDF/` directory exists and is writable
+2. Core logs include `[SUCCESS] PDF Generated: filename.pdf`
+3. File paths are correct (check console output for `[BOT FILE DETECTED]` messages)
+
+### GoFile uploads fail
+
+**Issue**: Network error or API change
+
+**Solution**: 
+- Check console for `[ERROR GOFILE]` messages
+- Verify internet connectivity
+- Test GoFile API manually: `https://api.gofile.io/servers`
+
+### Bot disconnects randomly
+
+**Issue**: Unstable connection or rate limiting
+
+**Solution**: 
+- Use a process manager with auto-restart (systemd, PM2)
+- Check Discord API status: https://discordstatus.com
+- Implement reconnection logic (already built into discord.py)
+
+## Security considerations
+
+<Warning>
+  Keep your bot token secret! Never commit `.env` files to version control.
+</Warning>
+
+### Token protection
+
+```bash .gitignore
+.env
+*.env
+```
+
+### Permission restrictions
+
+Grant only necessary permissions:
+- ✅ Send Messages
+- ✅ Attach Files
+- ✅ Embed Links
+- ❌ Administrator
+- ❌ Manage Server
+
+### Rate limiting
+
+Discord enforces rate limits on bot actions. The bot includes built-in rate limit handling via `discord.py`.
+
+## Performance optimization
+
+### Memory usage
+
+- The bot loads entire PDFs into memory for uploading
+- For large files (>50MB), consider streaming uploads
+- Monitor memory usage: `htop` or `ps aux | grep python`
+
+### Concurrent downloads
+
+The bot processes one download per command invocation. Multiple users can trigger downloads simultaneously, but each is independent.
+
+<Tip>
+  Implement a queue system if you need to limit concurrent downloads:
+  ```python
+  from asyncio import Semaphore
+  
+  download_semaphore = Semaphore(3)  # Max 3 concurrent downloads
+  
+  async with download_semaphore:
+      await core.process_entry(...)
+  ```
+</Tip>
+
+## Advanced customization
+
+### Custom embed colors
+
+```python
+# Success
+embed.color = discord.Color.green()  # bot.py:176
+
+# Error  
+embed.color = discord.Color.red()    # bot.py:200
+
+# In progress
+embed.color = discord.Color.blue()   # bot.py:47
+```
+
+### Update interval
+
+```python bot.py:42
+self.update_interval = 2.0  # seconds
+```
+
+Reduce for more frequent updates (higher API usage) or increase to reduce rate limit risk.
+
+### Log buffer size
+
+```python bot.py:54-55
+if len(self.logs) > 10:
+    self.logs.pop(0)
+```
+
+Increase the limit to show more log lines in the embed.
+
+## Comparison with other deployment methods
+
+| Feature | Discord Bot | Web App | Desktop App |
+|---------|------------|---------|-------------|
+| **Platform** | Discord | Browser | Native Windows |
+| **Multi-user** | Yes | Yes | No |
+| **File delivery** | Automatic | Manual download | Auto-open |
+| **Progress updates** | Embed | WebSocket | GUI |
+| **Large files** | GoFile upload | Direct download | Direct save |
+| **Setup complexity** | Moderate | High | Low |
+| **Remote access** | Yes | Yes | No |

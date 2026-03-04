@@ -1,0 +1,344 @@
+---
+title: Desktop application deployment
+description: Deploy the Universal Manga Downloader as a standalone Tkinter desktop GUI
+---
+
+The desktop application provides a native Windows interface with real-time progress tracking and log output.
+
+## Overview
+
+The desktop GUI (`app.py`) is a Tkinter-based application that wraps the core downloading functionality in a user-friendly interface. It's ideal for users who prefer a standalone executable without web dependencies.
+
+## Quick start
+
+<Steps>
+  <Step title="Install dependencies">
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+    Key dependencies:
+    - `Pillow` - Image processing
+    - `playwright` - Browser automation
+    - `crawl4ai` - Web scraping
+    - `img2pdf` - PDF generation
+  </Step>
+
+  <Step title="Launch the application">
+    ```bash
+    python app.py
+    ```
+
+    A desktop window will appear with the downloader interface.
+  </Step>
+
+  <Step title="Enter a URL and download">
+    1. Paste a manga URL in the input field
+    2. Click "Descargar PDF"
+    3. Monitor progress in the log area
+    4. The PDF will open automatically when complete
+  </Step>
+</Steps>
+
+<Info>
+  The desktop application automatically opens the generated PDF when the download completes.
+</Info>
+
+## Application interface
+
+The GUI consists of several components:
+
+```python app.py:29-65
+# Header
+ttk.Label(main_frame, text="Manga PDF Downloader", 
+          font=("Segoe UI", 16, "bold")).pack(pady=(0, 20))
+
+# Input Area
+input_frame = ttk.LabelFrame(main_frame, text="Input", padding="10")
+
+ttk.Label(input_frame, 
+          text="URL (TMO, M440, H2R, Hitomi, nhentai, ZonaTMO):").pack()
+self.url_entry = ttk.Entry(input_frame)
+
+self.btn_start = ttk.Button(input_frame, text="Descargar PDF", 
+                            command=self.start_process)
+self.btn_cancel = ttk.Button(input_frame, text="Detener", 
+                             command=self.cancel_process, state='disabled')
+
+# Progress Bar
+self.progress = ttk.Progressbar(input_frame, orient="horizontal", 
+                                length=100, mode="determinate")
+
+# Logging Area
+self.log_area = scrolledtext.ScrolledText(log_frame, state='disabled', 
+                                          font=("Consolas", 9))
+```
+
+### Main components
+
+| Component | Purpose |
+|-----------|--------|
+| **URL Entry** | Input field for manga URLs |
+| **Descargar PDF Button** | Starts the download process |
+| **Detener Button** | Cancels the active download |
+| **Progress Bar** | Visual progress indicator (current/total pages) |
+| **Log Area** | Scrollable text area showing real-time logs |
+
+## Supported sites
+
+The application validates URLs against supported domains:
+
+```python app.py:96-98
+supported_domains = ["tmohentai", "m440.in", "mangas.in", 
+                     "hentai2read", "hitomi.la", "nhentai.net", 
+                     "zonatmo.com"]
+```
+
+<Note>
+  The application will display a warning dialog if you enter a URL from an unsupported domain.
+</Note>
+
+### Supported manga sites
+
+- **TMOHentai** (tmohentai)
+- **Mangas440** (m440.in, mangas.in)
+- **Hentai2Read** (hentai2read)
+- **Hitomi** (hitomi.la)
+- **nhentai** (nhentai.net)
+- **ZonaTMO** (zonatmo.com)
+
+## Features
+
+### Real-time progress tracking
+
+The progress bar updates as pages are downloaded:
+
+```python app.py:131-135
+def safe_progress(current, total):
+    def _update():
+        self.progress['maximum'] = total
+        self.progress['value'] = current
+    self.root.after(0, _update)
+```
+
+### Live log output
+
+All download events are logged in real-time:
+
+```python app.py:77-87
+def log(self, message: str) -> None:
+    """Appends message to GUI log and File log."""
+    self.log_area.config(state='normal')
+    self.log_area.insert(tk.END, message + "\n")
+    self.log_area.see(tk.END)
+    self.log_area.config(state='disabled')
+    
+    try:
+        with open("downloader_debug.log", "a", encoding="utf-8") as f:
+            f.write(message + "\n")
+    except: pass
+```
+
+<Tip>
+  All logs are also saved to `downloader_debug.log` in the application directory for troubleshooting.
+</Tip>
+
+### Cancel support
+
+Downloads can be cancelled mid-process:
+
+```python app.py:119-122
+def cancel_process(self) -> None:
+    self.cancelled = True
+    self.log("[INFO] Cancelando...")
+    self.btn_cancel.config(state='disabled')
+```
+
+### Automatic file opening
+
+When a download completes, the PDF opens automatically:
+
+```python app.py:114-115
+# Use config module to set flag
+core.config.OPEN_RESULT_ON_FINISH = True
+```
+
+<Info>
+  This behavior is controlled by the `OPEN_RESULT_ON_FINISH` flag. Set it to `False` if you prefer manual opening.
+</Info>
+
+## Threading model
+
+The application uses threading to keep the GUI responsive during downloads:
+
+```python app.py:117
+threading.Thread(target=self.run_async, args=(url,), daemon=True).start()
+```
+
+```python app.py:124-141
+def run_async(self, url: str) -> None:
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    def safe_log(msg): self.root.after(0, self.log, msg)
+    check_cancel = lambda: self.cancelled
+
+    def safe_progress(current, total):
+        def _update():
+            self.progress['maximum'] = total
+            self.progress['value'] = current
+        self.root.after(0, _update)
+    
+    try:
+        loop.run_until_complete(core.process_entry(url, safe_log, 
+                                                    check_cancel, 
+                                                    progress_callback=safe_progress))
+    finally:
+        loop.close()
+        self.root.after(0, lambda: self.reset_buttons())
+```
+
+<Warning>
+  GUI updates must happen on the main thread. The application uses `root.after(0, ...)` to safely update GUI elements from the worker thread.
+</Warning>
+
+## Configuration
+
+### Customizing the interface
+
+You can modify the appearance by adjusting the style configuration:
+
+```python app.py:24-26
+style = ttk.Style()
+style.configure("TButton", font=("Segoe UI", 10))
+style.configure("TLabel", font=("Segoe UI", 11))
+```
+
+### Window size
+
+```python app.py:21
+self.root.geometry("800x600")
+```
+
+### Placeholder text
+
+```python app.py:43-45
+self.placeholder_text = "Pegar URL aquí..."
+self.url_entry.insert(0, self.placeholder_text)
+self.url_entry.config(foreground='grey')
+```
+
+## Log files
+
+The application creates a debug log file:
+
+- **Location**: `downloader_debug.log` (same directory as `app.py`)
+- **Contents**: Complete log of all download operations
+- **Behavior**: File is cleared at the start of each new download
+
+```python app.py:101-105
+try:
+    with open("downloader_debug.log", "w", encoding="utf-8") as f:
+        f.write("=== LOG START ===\n")
+except Exception as e:
+    print(f"Error writing log: {e}")
+```
+
+## Building an executable
+
+To create a standalone .exe file that doesn't require Python:
+
+<Steps>
+  <Step title="Install PyInstaller">
+    ```bash
+    pip install pyinstaller
+    ```
+  </Step>
+
+  <Step title="Build the executable">
+    ```bash
+    pyinstaller --onefile --windowed --name="MangaDownloader" app.py
+    ```
+
+    Options:
+    - `--onefile`: Package everything into a single .exe
+    - `--windowed`: Hide the console window
+    - `--name`: Set the executable name
+  </Step>
+
+  <Step title="Distribute the executable">
+    The executable will be in `dist/MangaDownloader.exe`. Users can run it without installing Python.
+  </Step>
+</Steps>
+
+<Warning>
+  PyInstaller executables may be flagged by antivirus software. Consider code-signing the executable or distributing the source code instead.
+</Warning>
+
+## Troubleshooting
+
+### Application won't start
+
+**Issue**: Import errors or missing modules
+
+**Solution**: Ensure all dependencies are installed:
+```bash
+pip install -r requirements.txt
+playwright install chromium
+playwright install-deps
+```
+
+### GUI freezes during download
+
+**Issue**: Threading not working properly
+
+**Solution**: This shouldn't happen with the current implementation. If it does, check that you're using Python 3.7+ with proper asyncio support.
+
+### PDF doesn't open automatically
+
+**Issue**: No default PDF viewer configured
+
+**Solution**: The application uses the system's default PDF handler. Ensure you have a PDF viewer installed (Adobe Reader, Edge, Chrome, etc.).
+
+### Download fails with no error
+
+**Issue**: Playwright browsers not installed
+
+**Solution**: 
+```bash
+playwright install chromium
+playwright install-deps
+```
+
+### Progress bar doesn't update
+
+**Issue**: Source site changed their structure
+
+**Solution**: Check `downloader_debug.log` for detailed error messages. The site parser may need updating.
+
+## Performance considerations
+
+- **Memory usage**: Each download loads images into memory. Large galleries (100+ pages) may require 500MB+ RAM.
+- **Disk space**: Generated PDFs are stored in the `PDF/` directory. Monitor disk usage for large libraries.
+- **CPU usage**: Image processing is CPU-intensive. Downloads may slow down on older hardware.
+
+<Tip>
+  Close other applications during large downloads to free up system resources.
+</Tip>
+
+## Comparison with web version
+
+| Feature | Desktop App | Web App |
+|---------|------------|--------|
+| **Installation** | Requires Python | Requires Node.js + Python |
+| **Interface** | Native Tkinter | Modern React UI |
+| **Auto-open PDF** | Yes | No (manual download) |
+| **Multi-user** | No | Yes (via WebSocket) |
+| **Deployment** | Single script | Two services (backend + frontend) |
+| **Cancel support** | Yes | Yes |
+| **Progress tracking** | Yes | Yes |
+| **Log output** | File + GUI | WebSocket stream |
+
+<Note>
+  Choose the desktop app for simplicity and the web app for remote access or multi-user scenarios.
+</Note>

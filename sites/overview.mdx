@@ -1,0 +1,158 @@
+---
+title: Supported sites
+description: Overview of all manga sites supported by Universal Manga Downloader
+---
+
+Universal Manga Downloader supports 6 popular manga and doujinshi websites, each using specialized extraction methods optimized for their site structure.
+
+## Supported sites table
+
+| Site | Domain | Method | Technology | Features |
+|------|---------|---------|------------|----------|
+| **ZonaTMO** | zonatmo.com | Crawler + Cascade | Crawl4AI + LLM | Series, single chapters, lazy loading |
+| **TMO-H** | tmohentai.* | AI Extraction | Crawl4AI + Gemini | Intelligent image detection |
+| **M440** | m440.in, mangas.in | Crawler | Crawl4AI | Covers, chapters, data-src parsing |
+| **Hentai2Read** | hentai2read.* | JSON Parsing | AsyncIO | Fast metadata extraction |
+| **Hitomi.la** | hitomi.la | Stealth Browser | Playwright | Bypasses 403/404 protection |
+| **NHentai** | nhentai.net | API + Browser | Playwright | Bypasses Cloudflare |
+
+## Extraction methods
+
+### Crawl4AI with LLM
+
+ZonaTMO and TMO-H use **Crawl4AI** with **Google Gemini 1.5 Flash** to intelligently extract image URLs from complex JavaScript-heavy pages. This method:
+
+- Executes JavaScript to trigger lazy loading
+- Uses AI to identify image URLs from multiple patterns
+- Falls back to regex if AI extraction fails
+- Handles `data-original` attributes and dynamic content
+
+<Note>
+Crawl4AI methods require a `GOOGLE_API_KEY` in your `.env` file for optimal performance.
+</Note>
+
+### Standard crawler
+
+M440 and Hentai2Read use simpler crawling techniques:
+
+- **M440**: Parses `data-src` attributes directly from HTML
+- **Hentai2Read**: Extracts image paths from embedded `gData` JSON variable
+
+### Browser automation
+
+Hitomi.la and NHentai require full browser automation using **Playwright** to:
+
+- Bypass anti-bot protections (Cloudflare, 403/404 blocks)
+- Simulate real user behavior
+- Handle dynamic content loading
+- Set proper headers and referrers
+
+## General usage
+
+All site handlers follow the same usage pattern:
+
+```python
+from core.handler import process_url
+
+# Single chapter
+await process_url(
+    "https://zonatmo.com/view_uploads/12345",
+    log_callback=print,
+    check_cancel=lambda: False
+)
+
+# Full series (for sites that support it)
+await process_url(
+    "https://zonatmo.com/library/manga/series-name",
+    log_callback=print,
+    check_cancel=lambda: False
+)
+```
+
+### Web interface
+
+You can also use the Next.js web interface:
+
+1. Launch the web version: `START_WEB_VERSION.bat`
+2. Open http://localhost:3000
+3. Paste any supported URL
+4. Watch real-time progress with WebSocket updates
+
+## URL patterns
+
+Each site has specific URL patterns it recognizes:
+
+### Chapter URLs
+
+- **ZonaTMO**: `https://zonatmo.com/view_uploads/[chapter-id]`
+- **TMO-H**: `https://tmohentai.com/contents/[manga]/[chapter]`
+- **M440**: `https://m440.in/manga/[series]/[chapter]`
+- **H2R**: `https://hentai2read.com/[title]/[chapter]`
+- **Hitomi**: `https://hitomi.la/reader/[id].html` or `https://hitomi.la/[type]/[title]-[id].html`
+- **NHentai**: `https://nhentai.net/g/[gallery-id]`
+
+### Series/Cover URLs
+
+- **ZonaTMO**: `https://zonatmo.com/library/manga/[series-name]`
+- **M440**: `https://m440.in/manga/[series-name]`
+
+<Warning>
+Hitomi and NHentai only support single gallery downloads, not full series.
+</Warning>
+
+## Feature comparison
+
+| Feature | ZonaTMO | TMO-H | M440 | H2R | Hitomi | NHentai |
+|---------|---------|-------|------|-----|--------|----------|
+| Single chapter | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Full series | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ |
+| Cover detection | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ |
+| Lazy loading | ✓ | ✓ | ✗ | ✗ | ✓ | ✗ |
+| Progress tracking | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Headless mode | N/A | N/A | N/A | N/A | ✓ | ✓ |
+
+## Performance considerations
+
+### Speed ranking (fastest to slowest)
+
+1. **Hentai2Read** - JSON parsing only, no image rendering
+2. **M440** - Simple regex extraction
+3. **TMO-H** - AI extraction with fallback
+4. **ZonaTMO** - AI extraction + cascade view
+5. **NHentai** - API fetch + browser automation
+6. **Hitomi.la** - Page-by-page browser navigation
+
+### Resource usage
+
+- **CPU-heavy**: ZonaTMO, TMO-H (AI processing)
+- **Memory-heavy**: Hitomi, NHentai (browser automation)
+- **Lightweight**: H2R, M440 (simple parsing)
+
+## Rate limiting
+
+The downloader includes built-in delays to prevent rate limiting:
+
+- 1 second between chapters (ZonaTMO series)
+- 500ms between pages (Hitomi)
+- Configurable concurrent downloads via `aiohttp`
+
+<Info>
+All handlers respect site ToS by simulating human-like browsing patterns.
+</Info>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="ZonaTMO" icon="book" href="/sites/zonatmo">
+    Learn about Crawl4AI cascade extraction
+  </Card>
+  <Card title="Hitomi.la" icon="browser" href="/sites/hitomi">
+    Understand stealth browser techniques
+  </Card>
+  <Card title="Configuration" icon="gear" href="/api/config">
+    Configure API keys and headers
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/concepts/architecture">
+    Explore the handler system
+  </Card>
+</CardGroup>

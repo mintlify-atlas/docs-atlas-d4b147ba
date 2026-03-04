@@ -1,0 +1,289 @@
+---
+title: Web application deployment
+description: Deploy the Universal Manga Downloader as a web application with FastAPI backend and Next.js frontend
+---
+
+The web application provides a modern browser-based interface with real-time progress updates via WebSocket connections.
+
+## Architecture
+
+The web version consists of two services:
+- **Backend**: FastAPI server (port 8000) with WebSocket support
+- **Frontend**: Next.js dashboard (port 3000)
+
+## Quick start with batch file
+
+<Steps>
+  <Step title="Run the startup script">
+    The easiest way to launch the web application on Windows is using the provided batch file:
+
+    ```bash
+    START_WEB_VERSION.bat
+    ```
+
+    This script will:
+    1. Install Python dependencies from `requirements.txt`
+    2. Start the backend server on port 8000
+    3. Start the frontend development server on port 3000
+    4. Open your browser to `http://localhost:3000`
+  </Step>
+
+  <Step title="Access the application">
+    Once both services are running, navigate to:
+
+    ```
+    http://localhost:3000
+    ```
+
+    The interface will automatically connect to the backend WebSocket server.
+  </Step>
+</Steps>
+
+<Info>
+  The batch file opens two separate command windows - one for the backend and one for the frontend. Keep both windows open while using the application.
+</Info>
+
+## Manual deployment
+
+If you prefer to start services manually or are not on Windows, follow these steps:
+
+<Steps>
+  <Step title="Install dependencies">
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+    Key dependencies include:
+    - `fastapi` - Web framework
+    - `uvicorn` - ASGI server
+    - `websockets` - Real-time communication
+    - `playwright` - Browser automation
+    - `crawl4ai` - Web scraping
+  </Step>
+
+  <Step title="Start the backend server">
+    <CodeGroup>
+      ```bash Terminal
+      python web_server.py
+      ```
+
+      ```python web_server.py (excerpt)
+      if __name__ == "__main__":
+          import uvicorn
+          uvicorn.run(app, host="0.0.0.0", port=8000)
+      ```
+    </CodeGroup>
+
+    The backend will start on `http://0.0.0.0:8000` and listen for WebSocket connections at `/ws`.
+  </Step>
+
+  <Step title="Start the frontend">
+    In a separate terminal:
+
+    ```bash
+    cd web_client_next
+    npm install  # First time only
+    npm run dev
+    ```
+
+    The frontend will start on `http://localhost:3000`.
+  </Step>
+</Steps>
+
+## Configuration
+
+### Backend configuration
+
+The backend server includes several security features and configuration options:
+
+#### CORS settings
+
+```python web_server.py:32-38
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://localhost:5173", 
+                   "http://127.0.0.1:3000", "http://127.0.0.1:5173"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
+```
+
+<Warning>
+  The CORS policy is configured for local development. For production deployments, update `allow_origins` to include your production domain.
+</Warning>
+
+#### PDF storage
+
+Generated PDFs are stored in the `PDF/` directory by default:
+
+```python web_server.py:42-44
+pdf_dir = os.path.join(os.getcwd(), core.config.PDF_FOLDER_NAME)
+if not os.path.exists(pdf_dir):
+    os.makedirs(pdf_dir)
+```
+
+#### Rate limiting
+
+The server includes basic DoS protection with a concurrent download limit:
+
+```python web_server.py:73-74
+ACTIVE_DOWNLOADS = 0
+MAX_DOWNLOADS = 3
+```
+
+<Tip>
+  Adjust `MAX_DOWNLOADS` based on your server's resources. Each download consumes memory and CPU for image processing.
+</Tip>
+
+### Environment variables
+
+Create a `.env` file in the root directory for optional configuration:
+
+```bash .env
+# Optional: Google API key for enhanced scraping
+GOOGLE_API_KEY=your_api_key_here
+```
+
+## WebSocket protocol
+
+The frontend communicates with the backend via WebSocket at `/ws`. Here's how the protocol works:
+
+### Starting a download
+
+```json
+{
+  "command": "start",
+  "url": "https://example.com/manga/chapter"
+}
+```
+
+### Cancelling a download
+
+```json
+{
+  "command": "cancel"
+}
+```
+
+### Server responses
+
+The server sends several types of messages:
+
+<CodeGroup>
+  ```json Status updates
+  {
+    "type": "status",
+    "status": "running" | "completed" | "error"
+  }
+  ```
+
+  ```json Progress updates
+  {
+    "type": "progress",
+    "current": 15,
+    "total": 30
+  }
+  ```
+
+  ```json Log messages
+  {
+    "type": "log",
+    "message": "[INFO] Downloading page 1/30..."
+  }
+  ```
+
+  ```json Completion
+  {
+    "type": "status",
+    "status": "completed",
+    "filename": "manga_chapter.pdf"
+  }
+  ```
+</CodeGroup>
+
+## Port configuration
+
+| Service | Default Port | Configurable |
+|---------|-------------|-------------|
+| Backend | 8000 | Yes (modify `web_server.py:174`) |
+| Frontend | 3000 | Yes (Next.js config) |
+
+To change the backend port:
+
+```python web_server.py
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8080)  # Changed from 8000
+```
+
+<Note>
+  If you change the backend port, update the WebSocket connection URL in the frontend code accordingly.
+</Note>
+
+## Security features
+
+The web server includes multiple security protections:
+
+### Path traversal prevention
+
+```python web_server.py:56-59
+target_path = os.path.abspath(os.path.join(pdf_dir, filename))
+if not target_path.startswith(os.path.abspath(pdf_dir)):
+    print(f"SECURITY WARNING: Attempted path traversal for '{filename}'. Blocked.")
+    return {"error": "Invalid file path requested."}
+```
+
+### Rate limiting
+
+```python web_server.py:103-105
+if ACTIVE_DOWNLOADS >= MAX_DOWNLOADS:
+    await websocket.send_json({"type": "error", 
+                               "message": "Server is currently busy. Please try again later."})
+```
+
+### Error sanitization
+
+```python web_server.py:154-156
+logging.error(f"Internal processing error: {e}")
+await websocket.send_json({"type": "error", 
+                           "message": "An unexpected internal error occurred during processing."})
+```
+
+## Troubleshooting
+
+### Backend won't start
+
+- **Port already in use**: Another application is using port 8000. Change the port or stop the conflicting application.
+- **Missing dependencies**: Run `pip install -r requirements.txt` again.
+- **Playwright browsers not installed**: Run `playwright install chromium`.
+
+### Frontend can't connect to backend
+
+- Verify the backend is running on port 8000
+- Check CORS configuration includes your frontend URL
+- Ensure no firewall is blocking WebSocket connections
+
+### Downloads fail silently
+
+- Check the backend terminal for error logs
+- Verify the PDF directory is writable
+- Ensure Playwright browsers are installed: `playwright install-deps`
+
+## Production considerations
+
+<Warning>
+  The default configuration is optimized for local development. For production deployments:
+</Warning>
+
+1. **Use production ASGI server**: Deploy with Gunicorn + Uvicorn workers
+2. **Enable HTTPS**: Configure SSL certificates for secure WebSocket connections (WSS)
+3. **Update CORS policy**: Restrict `allow_origins` to your production domain
+4. **Set up reverse proxy**: Use Nginx or Caddy to handle static files and WebSocket upgrades
+5. **Implement authentication**: Add user authentication to prevent unauthorized access
+6. **Monitor resources**: Track CPU/memory usage and adjust `MAX_DOWNLOADS` accordingly
+7. **Configure logging**: Set up proper logging with rotation and monitoring
+
+<Tip>
+  Consider using Docker for production deployments. See the [Docker deployment guide](/deployment/docker) for containerized setup.
+</Tip>

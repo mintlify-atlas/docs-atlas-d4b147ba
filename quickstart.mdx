@@ -1,80 +1,400 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quick start
+description: Download your first manga in under 5 minutes with this step-by-step guide
 ---
 
-## Get started in three steps
+<Note>
+  This guide assumes you've already completed the [installation](/installation) steps. If not, please install the project first.
+</Note>
 
-Get your documentation site running locally and make your first customization.
+## Choose your deployment method
 
-### Step 1: Set up your local environment
+Universal Manga Downloader offers three ways to download manga. For first-time users, we recommend the web interface:
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+<CardGroup cols={3}>
+  <Card title="Web app" icon="browser">
+    **Recommended**
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
+    Modern dashboard with real-time progress
+  </Card>
+  <Card title="Desktop app" icon="desktop">
+    **Simple**
     
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
+    Standalone GUI, no server needed
+  </Card>
+  <Card title="Discord bot" icon="discord">
+    **Remote**
     
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    Download from anywhere via Discord
+  </Card>
+</CardGroup>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+This guide focuses on the **web app** method. For other methods, see [Deployment Options](/deployment/web-app).
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+## Launch the web application
 
-### Step 3: Go live
+<Steps>
+  <Step title="Start the server">
+    The web application runs as a full-stack app with both backend (FastAPI) and frontend (Next.js) components.
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+    <CodeGroup>
+      ```bash Windows
+      # Double-click this file or run in terminal:
+      START_WEB_VERSION.bat
+      ```
+
+      ```bash Linux/macOS
+      # Start backend and frontend separately:
+      
+      # Terminal 1 - Start FastAPI backend:
+      python web_server.py
+      
+      # Terminal 2 - Start Next.js frontend:
+      cd web_client_next
+      npm run dev
+      ```
+    </CodeGroup>
+
+    <Info>
+      On Windows, the `START_WEB_VERSION.bat` launcher automatically starts both servers and opens your browser. On Linux/macOS, you need to run them separately in two terminal windows.
+    </Info>
+
+    Expected output:
+
+    ```
+    INFO:     Started server process [12345]
+    INFO:     Waiting for application startup.
+    INFO:     Application startup complete.
+    INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+    ```
+
+    The frontend will display:
+
+    ```
+    ready - started server on 0.0.0.0:3000, url: http://localhost:3000
+    ```
+  </Step>
+
+  <Step title="Open the dashboard">
+    The web interface will automatically open, or navigate to:
+
+    ```
+    http://localhost:3000
+    ```
+
+    You should see the Universal Manga Downloader dashboard with:
+    - URL input field
+    - Download button
+    - Real-time log viewer
+    - Progress indicator
+
+    <Tip>
+      Bookmark this URL for easy access. The server will keep running until you close the terminal or stop it with `CTRL+C`.
+    </Tip>
+  </Step>
+
+  <Step title="Find a manga URL">
+    The downloader supports multiple manga sites. For this example, let's use a supported site:
+
+    **Supported sites:**
+    - Z-TMO (zonatmo.com)
+    - TMO-H (tmohentai.com)
+    - M440 (m440.in)
+    - H2R (hentai2read.com)
+    - Hi.la (hitomi.la)
+    - NH.net (nhentai.net)
+
+    Copy a chapter or gallery URL from any supported site. For example:
+
+    ```
+    https://example-site.com/manga/chapter-1
+    ```
+
+    <Warning>
+      Make sure you're using the **full URL** including `https://`. Partial URLs or search queries won't work.
+    </Warning>
+  </Step>
+
+  <Step title="Download your manga">
+    Paste the URL into the input field and click **Download**.
+
+    The interface will show:
+
+    1. **Connection status** - WebSocket connects to backend
+    2. **Site detection** - Handler identifies the manga site
+    3. **Metadata extraction** - Title, page count, chapter info
+    4. **Image downloads** - Progress bar updates in real-time
+    5. **PDF generation** - Images converted to PDF
+    6. **Completion** - Download link appears
+
+    Example log output:
+
+    ```
+    [INFO] Processing URL: https://example-site.com/manga/chapter-1
+    [INFO] Detected site: ZonaTMO
+    [INFO] Title: Example Manga - Chapter 1
+    [INFO] Total pages: 45
+    [INFO] Downloading images...
+    [PROGRESS] 10/45 (22%)
+    [PROGRESS] 20/45 (44%)
+    [PROGRESS] 30/45 (67%)
+    [PROGRESS] 40/45 (89%)
+    [PROGRESS] 45/45 (100%)
+    [INFO] Creating PDF...
+    [SUCCESS] PDF Generated: Example_Manga_Chapter_1.pdf
+    [INFO] Cleaning up temporary files...
+    [DONE] Process completed successfully!
+    ```
+
+    <Info>
+      The progress bar shows both the **current page** and **total pages**. Most chapters download in 30-60 seconds depending on page count and image sizes.
+    </Info>
+  </Step>
+
+  <Step title="View your PDF">
+    When the download completes, a **View PDF** button appears. Click it to open the generated file.
+
+    Your PDF will also be saved in the `PDF/` directory:
+
+    ```bash
+    MangaDownloader/
+    └── PDF/
+        └── Example_Manga_Chapter_1.pdf
+    ```
+
+    <Tip>
+      The PDF filename is automatically sanitized and includes the manga title and chapter number. Special characters are replaced with underscores.
+    </Tip>
+  </Step>
+</Steps>
+
+## Understanding the output
+
+### PDF quality
+
+The generated PDFs maintain original image quality with:
+
+- **No compression** - Images preserved at source resolution
+- **Proper page order** - Pages sequenced correctly
+- **Optimized file size** - Efficient PDF structure without quality loss
+- **Standard format** - Compatible with all PDF readers
+
+### File locations
+
+Generated files are stored in organized directories:
+
+```
+MangaDownloader/
+├── PDF/                           # Final PDFs (permanent)
+│   └── Your_Manga_Title.pdf
+└── temp_manga_images/            # Temporary images (auto-deleted)
+    └── [cleaned up after PDF creation]
+```
+
+<Warning>
+  Don't modify files in `temp_manga_images/` during downloads. This directory is automatically cleaned after PDF generation.
+</Warning>
+
+## Common workflows
+
+### Downloading multiple chapters
+
+To download multiple chapters:
+
+1. Complete the first download
+2. Copy the next chapter URL
+3. Paste and click Download again
+4. Repeat for each chapter
+
+<Tip>
+  The server supports **concurrent downloads** (up to 3 simultaneous). Open multiple browser tabs to download different chapters in parallel.
+</Tip>
+
+### Canceling a download
+
+If you need to stop a download:
+
+1. Click the **Cancel** button in the web interface
+2. Wait for the current batch to finish
+3. The process will stop and clean up temporary files
+
+Log output:
+
+```
+[INFO] Cancellation requested
+[INFO] Stopping current batch...
+[INFO] Cleaning up temporary files...
+[DONE] Download cancelled by user
+```
+
+### Handling errors
+
+If a download fails, check the log for details:
+
+<CodeGroup>
+  ```log Invalid URL
+  [ERROR] Invalid URL provided.
+  # Solution: Check that you copied the complete URL
+  ```
+
+  ```log Unsupported site
+  [ERROR] Unsupported website.
+  # Solution: Verify the site is in the supported list
+  ```
+
+  ```log Network error
+  [ERROR] Failed to fetch page: Connection timeout
+  # Solution: Check your internet connection and try again
+  ```
+
+  ```log Server busy
+  [ERROR] Server is currently busy. Please try again later.
+  # Solution: Wait a moment and retry (concurrent download limit reached)
+  ```
+</CodeGroup>
+
+<Note>
+  Most errors are recoverable. Simply fix the issue and try downloading again. The system automatically cleans up partial downloads.
+</Note>
+
+## Testing the API directly
+
+For developers or advanced users, you can test the backend API directly:
+
+### Health check
+
+```bash
+curl http://localhost:8000/
+```
+
+### List available PDFs
+
+```bash
+ls PDF/
+```
+
+### Access a PDF via API
+
+```bash
+curl http://localhost:8000/pdfs/Your_Manga_Title.pdf --output manga.pdf
+```
+
+### WebSocket connection test
+
+Use a WebSocket client to connect to `ws://localhost:8000/ws` and send:
+
+```json
+{
+  "command": "start",
+  "url": "https://example-site.com/manga/chapter-1"
+}
+```
+
+You'll receive real-time updates:
+
+```json
+{"type": "status", "status": "running"}
+{"type": "log", "message": "[INFO] Processing URL..."}
+{"type": "progress", "current": 10, "total": 45}
+{"type": "status", "status": "completed", "filename": "Example_Manga.pdf"}
+```
+
+## Alternative: Desktop app quick start
+
+If you prefer a standalone GUI without running a server:
+
+<Steps>
+  <Step title="Launch the desktop app">
+    ```bash
+    python app.py
+    ```
+
+    A Tkinter window opens with the same functionality.
+  </Step>
+
+  <Step title="Enter URL and download">
+    1. Paste your manga URL in the input field
+    2. Click **Descargar PDF** (Download PDF)
+    3. Watch the progress bar and logs
+    4. The PDF opens automatically when complete
+  </Step>
+</Steps>
+
+<Info>
+  The desktop app stores PDFs in the same `PDF/` directory and uses identical core functionality. Choose whichever interface you prefer!
+</Info>
+
+## Alternative: Discord bot quick start
+
+For remote downloads via Discord:
+
+<Steps>
+  <Step title="Configure Discord token">
+    Add your bot token to `.env`:
+
+    ```ini
+    DISCORD_TOKEN=your_token_here
+    ```
+  </Step>
+
+  <Step title="Start the bot">
+    ```bash
+    python bot.py
+    ```
+
+    Expected output:
+    ```
+    Bot connected as YourBotName#1234
+    ```
+  </Step>
+
+  <Step title="Use Discord commands">
+    In any Discord channel where your bot has access:
+
+    ```
+    !descargar https://example-site.com/manga/chapter-1
+    ```
+
+    The bot will:
+    1. Reply with a status embed
+    2. Update progress in real-time
+    3. Upload the PDF (or GoFile link if >8MB)
+  </Step>
+</Steps>
+
+<Tip>
+  Files over 8MB are automatically uploaded to GoFile and you'll receive a download link. This bypasses Discord's file size limits.
+</Tip>
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
+Now that you've downloaded your first manga, explore more features:
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Deployment options" icon="server" href="/deployment/web-app">
+    Learn about all deployment methods in detail
+  </Card>
+  <Card title="Core concepts" icon="lightbulb" href="/concepts/architecture">
+    Understand the architecture and design patterns
+  </Card>
+  <Card title="Supported sites" icon="globe" href="/sites/overview">
+    See all supported manga sites and their features
+  </Card>
+  <Card title="API reference" icon="code" href="/api/handler">
+    Build custom integrations with the API
+  </Card>
 </CardGroup>
 
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>
+## Getting help
+
+If you encounter issues:
+
+1. Review the installation guide for common issues
+2. Review logs in the web interface or console
+3. Verify your `.env` configuration
+4. Ensure all dependencies are installed
+5. Open an issue on [GitHub](https://github.com/Holkeano526/MangaDownloader/issues)
+
+<Warning>
+  Always include your Python version, operating system, and relevant log output when reporting issues. Redact any sensitive information like API tokens.
+</Warning>

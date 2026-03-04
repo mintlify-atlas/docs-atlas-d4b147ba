@@ -1,0 +1,216 @@
+---
+title: BaseSiteHandler
+description: Abstract base class for implementing custom site handlers
+---
+
+## Overview
+
+`BaseSiteHandler` is an abstract base class that defines the interface for all site-specific download handlers in the Universal Manga Downloader. It implements the Strategy Pattern, allowing you to add support for new manga/doujinshi websites by creating custom handler implementations.
+
+## Class signature
+
+```python
+from abc import ABC, abstractmethod
+from typing import Callable, Optional
+
+class BaseSiteHandler(ABC):
+    """Abstract base class for all site handlers."""
+```
+
+**Source:** `core/sites/base.py:5`
+
+## Abstract methods
+
+Every site handler must implement these two abstract methods:
+
+### get_supported_domains()
+
+Returns a list of domain strings that this handler supports.
+
+```python
+@staticmethod
+@abstractmethod
+def get_supported_domains() -> list:
+    """Returns a list of domain strings supported by this handler."""
+    pass
+```
+
+**Source:** `core/sites/base.py:8-12`
+
+<ParamField path="return" type="list">
+  List of domain strings (e.g., `["example.com", "manga.example.com"]`)
+</ParamField>
+
+**Example:**
+
+```python
+class MyCustomHandler(BaseSiteHandler):
+    @staticmethod
+    def get_supported_domains() -> list:
+        return ["mysite.com", "manga.mysite.com"]
+```
+
+### process()
+
+The main processing method that downloads manga/doujinshi from the given URL.
+
+```python
+@abstractmethod
+async def process(
+    self, 
+    url: str, 
+    log_callback: Callable[[str], None], 
+    check_cancel: Callable[[], bool], 
+    progress_callback: Optional[Callable[[int, int], None]] = None
+) -> None:
+    """
+    Process the given URL to download manga/doujinshi.
+    
+    Args:
+        url: The URL to process
+        log_callback: Function to report logs
+        check_cancel: Function returning True if cancellation is requested
+        progress_callback: Optional function to report progress (current, total)
+    """
+    pass
+```
+
+**Source:** `core/sites/base.py:14-31`
+
+<ParamField path="url" type="str" required>
+  The manga/doujinshi URL to process and download
+</ParamField>
+
+<ParamField path="log_callback" type="Callable[[str], None]" required>
+  Callback function for logging messages. Call this to report status updates, errors, and debug information to the user.
+</ParamField>
+
+<ParamField path="check_cancel" type="Callable[[], bool]" required>
+  Function that returns `True` if the user has requested cancellation. Check this periodically in loops to support graceful cancellation.
+</ParamField>
+
+<ParamField path="progress_callback" type="Callable[[int, int], None]">
+  Optional callback to report download progress. First parameter is current progress, second is total items.
+</ParamField>
+
+## Creating a custom handler
+
+To add support for a new website, you need to:
+
+1. Create a new class that inherits from `BaseSiteHandler`
+2. Implement `get_supported_domains()` to return the domains you support
+3. Implement `process()` to handle the download logic
+4. Register your handler in `core/sites/__init__.py`
+
+### Example implementation
+
+```python
+from typing import Callable, Optional
+from crawl4ai import AsyncWebCrawler
+import re
+
+from .base import BaseSiteHandler
+from .. import config
+from ..utils import download_and_make_pdf, clean_filename
+
+
+class MyCustomHandler(BaseSiteHandler):
+    """Handler for MyCustomSite website."""
+    
+    @staticmethod
+    def get_supported_domains() -> list:
+        return ["mycustomsite.com"]
+    
+    async def process(
+        self,
+        url: str,
+        log_callback: Callable[[str], None],
+        check_cancel: Callable[[], bool],
+        progress_callback: Optional[Callable[[int, int], None]] = None
+    ) -> None:
+        """Process MyCustomSite URL."""
+        log_callback("[INIT] Processing MyCustomSite...")
+        
+        # Check for cancellation
+        if check_cancel():
+            return
+        
+        # Crawl the page
+        async with AsyncWebCrawler(verbose=True) as crawler:
+            result = await crawler.arun(url=url, bypass_cache=True)
+            
+            if not result.success:
+                log_callback(f"[ERROR] Failed to load page: {result.error_message}")
+                return
+            
+            # Extract image URLs from HTML
+            html = result.html
+            image_urls = re.findall(r'data-src="(https://cdn\.mycustomsite\.com/[^"]+)"', html)
+            
+            if not image_urls:
+                log_callback("[ERROR] No images found")
+                return
+            
+            log_callback(f"[INFO] Found {len(image_urls)} images")
+            
+            # Extract title
+            title_match = re.search(r'<h1>(.*?)</h1>', html)
+            pdf_name = clean_filename(title_match.group(1)) + ".pdf" if title_match else "manga.pdf"
+            
+            # Download and create PDF
+            await download_and_make_pdf(
+                image_urls,
+                pdf_name,
+                config.HEADERS_DEFAULT,
+                log_callback,
+                check_cancel,
+                progress_callback,
+                open_result=config.OPEN_RESULT_ON_FINISH
+            )
+```
+
+### Registering your handler
+
+After creating your handler, register it in `core/sites/__init__.py`:
+
+```python
+from .tmo import TMOHandler
+from .m440 import M440Handler
+from .h2r import H2RHandler
+from .hitomi import HitomiHandler
+from .nhentai import NHentaiHandler
+from .zonatmo import ZonaTMOHandler
+from .mycustom import MyCustomHandler  # Add your handler
+```
+
+## Strategy Pattern
+
+The `BaseSiteHandler` implements the Strategy Pattern, which provides several benefits:
+
+- **Extensibility**: Add new site support without modifying existing code
+- **Maintainability**: Each site's logic is isolated in its own class
+- **Testability**: Test each handler independently
+- **Flexibility**: Use different scraping technologies (Playwright, Crawl4AI, aiohttp) per handler
+
+The downloader's main logic selects the appropriate handler based on the URL's domain by checking each handler's `get_supported_domains()` method.
+
+## Available utilities
+
+You can use these helper functions from `core.utils` in your handler:
+
+- `download_and_make_pdf()` - Download images and create a PDF
+- `clean_filename()` - Sanitize filenames
+- `finalize_pdf_flow()` - Create PDF from local image files
+
+See the [Utilities](/api/utils) reference for detailed documentation.
+
+## See also
+
+<CardGroup cols={2}>
+  <Card title="Site handlers" icon="globe" href="/api/site-handlers">
+    View all handler implementations
+  </Card>
+  <Card title="Utilities" icon="wrench" href="/api/utilities">
+    Helper functions for handlers
+  </Card>
+</CardGroup>

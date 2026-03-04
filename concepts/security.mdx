@@ -1,0 +1,364 @@
+---
+title: Security features
+description: Learn about the security measures that protect Universal Manga Downloader from SSRF, path traversal, and DoS attacks
+---
+
+Universal Manga Downloader implements multiple security layers to protect both the application and its users. The codebase includes detailed security comments explaining the rationale behind each protection.
+
+## SSRF prevention
+
+Server-Side Request Forgery (SSRF) is prevented through strict hostname validation in the handler routing system.
+
+### The vulnerability
+
+Without proper validation, an attacker could craft URLs like:
+
+```
+http://localhost:8000/api/admin?fake=tmohentai
+```
+
+A naive `domain in url` check would pass this URL to the TMO handler, causing the server to make requests to internal endpoints.
+
+### The protection
+
+The router validates that supported domains exist within the **parsed hostname**, not the full URL:
+
+```python core/handler.py
+async def process_entry(
+    url: str,
+    log_callback: Callable[[str], None],
+    check_cancel: Callable[[], bool],
+    progress_callback: Optional[Callable[[int, int], None]] = None
+) -> None:
+    try:
+        parsed_url = urlparse(url)
+        hostname = parsed_url.netloc.lower()
+    except Exception:
+        log_callback("[ERROR] Invalid URL provided.")
+        return
+
+    for handler in HANDLERS:
+        # [SECURITY] SSRF Prevention
+        # Validate that the domain exists in the hostname,
+        # not just anywhere in the URL string.
+        # This prevents attackers from injecting internal URLs like:
+        # http://localhost:8000/api/admin?fake=tmohentai
+        supported = handler.get_supported_domains()
+        if any(domain in hostname for domain in supported):
+            await handler.process(url, log_callback, check_cancel, progress_callback)
+            return
+            
+    log_callback("[ERROR] Unsupported website.")
+```
+
+<Note>
+By extracting and validating only the `netloc` component (hostname), the router ensures that HTTP requests target legitimate manga sites, not internal services or arbitrary hosts.
+</Note>
+
+### Why this matters
+
+SSRF attacks could allow malicious users to:
+- Access internal admin panels
+- Scan internal network infrastructure
+- Exploit services not exposed to the internet
+- Bypass firewall rules
+
+## Path traversal protection
+
+Local File Inclusion (LFI) and path traversal attacks are prevented when serving PDF files to web clients.
+
+### The vulnerability
+
+Without validation, an attacker could request:
+
+```
+GET /pdfs/../../etc/passwd
+GET /pdfs/../../../Users/victim/.ssh/id_rsa
+```
+
+This would allow reading arbitrary files from the server's filesystem.
+
+### The protection
+
+The web server validates that resolved paths remain within the PDF directory:
+
+```python web_server.py
+@app.get("/pdfs/{filename:path}")
+async def get_pdf(filename: str):
+    filename = unquote(filename)
+    
+    # [SECURITY] Path Traversal / Local File Inclusion (LFI) Prevention
+    # This block ensures an attacker cannot inject sequences like '../../'
+    # to read system files (e.g., passwords, source code).
+    # We force the OS to resolve the absolute real path and verify
+    # mathematically that it MUST originate from the 'pdf_dir' folder.
+    target_path = os.path.abspath(os.path.join(pdf_dir, filename))
+    if not target_path.startswith(os.path.abspath(pdf_dir)):
+        print(f"SECURITY WARNING: Attempted path traversal for '{filename}'. Blocked.")
+        return {"error": "Invalid file path requested."}
+    
+    if os.path.exists(target_path) and os.path.isfile(target_path):
+        response = FileResponse(target_path, media_type="application/pdf")
+        response.headers["Content-Disposition"] = "inline"
+        return response
+    
+    return {"error": "File not found."}
+```
+
+### How it works
+
+1. **URL decode** the filename to handle encoded characters
+2. **Resolve absolute path** by joining `pdf_dir` + `filename`
+3. **Verify containment** - ensure resolved path starts with `pdf_dir`
+4. **Reject if outside** the PDF directory
+
+<Warning>
+Always use `os.path.abspath()` to resolve paths before validation. This handles relative path segments (`../`) correctly across all operating systems.
+</Warning>
+
+### Example validation
+
+<CodeGroup>
+
+```python Legitimate request
+pdf_dir = "/home/user/manga/PDF"
+filename = "One Piece/chapter_1.pdf"
+target = os.path.abspath(os.path.join(pdf_dir, filename))
+# target = "/home/user/manga/PDF/One Piece/chapter_1.pdf"
+# ✅ Starts with pdf_dir - ALLOWED
+```
+
+```python Attack attempt
+pdf_dir = "/home/user/manga/PDF"
+filename = "../../etc/passwd"
+target = os.path.abspath(os.path.join(pdf_dir, filename))
+# target = "/home/user/manga/etc/passwd"
+# ❌ Does NOT start with pdf_dir - BLOCKED
+```
+
+</CodeGroup>
+
+## CORS enforcement
+
+Cross-Origin Resource Sharing (CORS) is configured to prevent unauthorized web pages from accessing the local server.
+
+### The vulnerability
+
+Using `allow_origins=["*"]` with `allow_credentials=True` would allow any malicious website to:
+- Connect to the user's local server
+- Submit download requests
+- Access generated PDFs
+- Potentially exploit other endpoints
+
+### The protection
+
+CORS middleware restricts access to known development origins:
+
+```python web_server.py
+# [SECURITY] CORS Mitigation
+# Avoid using allow_origins=["*"] with allow_credentials=True,
+# as this would allow any external malicious web page to connect
+# to the user's local server.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173"
+    ],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
+```
+
+<Info>
+The origins listed correspond to common development server ports:
+- `3000` - Create React App, Next.js
+- `5173` - Vite
+
+For production deployments, you should update this list to include only your production domain.
+</Info>
+
+### Production considerations
+
+For production deployments:
+
+```python
+# Add your production domain
+allow_origins=[
+    "https://yourdomain.com",
+    "https://www.yourdomain.com",
+    # Keep localhost for local testing if needed
+    "http://localhost:3000"
+]
+```
+
+## DoS protection
+
+Denial of Service (DoS) protection prevents resource exhaustion through rate limiting.
+
+### The vulnerability
+
+Without limits, a malicious user could:
+- Submit hundreds of simultaneous downloads
+- Exhaust server memory and CPU
+- Make the service unavailable to legitimate users
+- Fill disk space with temporary files
+
+### The protection
+
+The web server limits concurrent downloads globally:
+
+```python web_server.py
+# Basic DoS Protection: Limit active downloads
+ACTIVE_DOWNLOADS = 0
+MAX_DOWNLOADS = 3
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    global ACTIVE_DOWNLOADS
+    await websocket.accept()
+    
+    # ... (cancel event setup)
+    
+    if command == "start":
+        # SECURITY PATCH: DoS / Resource Exhaustion Protection
+        if ACTIVE_DOWNLOADS >= MAX_DOWNLOADS:
+            await websocket.send_json({
+                "type": "error",
+                "message": "Server is currently busy. Please try again later."
+            })
+            continue
+        
+        ACTIVE_DOWNLOADS += 1
+        # ... (process download)
+        
+        finally:
+            ACTIVE_DOWNLOADS = max(0, ACTIVE_DOWNLOADS - 1)
+```
+
+### Configuration
+
+You can adjust the concurrency limit based on your server's resources:
+
+```python
+# For more powerful servers
+MAX_DOWNLOADS = 10
+
+# For resource-constrained environments
+MAX_DOWNLOADS = 1
+```
+
+<Accordion title="Why limit to 3 concurrent downloads?">
+
+The default limit of 3 concurrent downloads balances:
+
+- **User experience** - Multiple users can download simultaneously
+- **Resource usage** - Each download consumes memory, CPU, and network bandwidth
+- **Stability** - Prevents server crashes under load
+
+For manga downloads with 20-200 images each, 3 concurrent operations is typically safe for servers with 2GB+ RAM.
+
+</Accordion>
+
+## Information leakage prevention
+
+Internal error details are logged server-side but never exposed to clients.
+
+### The vulnerability
+
+Detailed error messages could reveal:
+- File system paths
+- Database structure
+- Internal library versions
+- Stack traces with code snippets
+
+### The protection
+
+Errors are sanitized before sending to clients:
+
+```python web_server.py
+try:
+    await core.process_entry(
+        url, 
+        log_callback, 
+        check_cancel, 
+        progress_callback=progress_callback
+    )
+    await websocket.send_json({
+        "type": "status", 
+        "status": "completed",
+        "filename": final_filename
+    })
+except Exception as e:
+    # SECURITY PATCH: Information Leakage Prevention
+    # Log the actual error to the console, send a sanitized message to the client
+    logging.error(f"Internal processing error: {e}")
+    await websocket.send_json({
+        "type": "error",
+        "message": "An unexpected internal error occurred during processing."
+    })
+    await websocket.send_json({"type": "status", "status": "error"})
+```
+
+<Warning>
+Never send raw exception messages to clients in production. Always log detailed errors server-side and return generic error messages.
+</Warning>
+
+## Security checklist
+
+When adding new features or handlers, verify:
+
+- [ ] URLs are parsed and validated using `urlparse()`
+- [ ] Hostnames are checked against allowlists, not the full URL
+- [ ] File paths are resolved with `os.path.abspath()` before validation
+- [ ] Resolved paths are verified to be within allowed directories
+- [ ] CORS origins are explicitly listed (never use `["*"]`)
+- [ ] Rate limiting protects resource-intensive operations
+- [ ] Exception details are logged but not exposed to clients
+- [ ] User input is sanitized before use in file operations
+
+## Security comments in source
+
+The codebase includes detailed Spanish security comments at critical points. These explain:
+
+- **What** vulnerability is being prevented
+- **Why** the protection is necessary
+- **How** the attack would work without the protection
+
+Example:
+
+```python
+# [SEGURIDAD - OPEN SOURCE] 
+# Prevención de Server-Side Request Forgery (SSRF).
+# Validamos que el dominio base (ej. 'tmohentai') exista genuinamente
+# dentro del 'hostname' extraído, en lugar de hacer un simple
+# 'domain in url' que permitiría a un atacante inyectar URLs internas
+# como: `http://localhost:8000/api/admin?fake=tmohentai`.
+```
+
+<Info>
+These comments serve as documentation for security audits and help future maintainers understand the threat model.
+</Info>
+
+## Reporting security issues
+
+If you discover a security vulnerability:
+
+1. **Do not** open a public GitHub issue
+2. Email the maintainer directly with details
+3. Include steps to reproduce the vulnerability
+4. Allow time for a patch before public disclosure
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Async downloads" icon="download" href="/concepts/async-downloads">
+    Learn how concurrent downloads are implemented safely
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/concepts/architecture">
+    Understand the overall system design
+  </Card>
+</CardGroup>

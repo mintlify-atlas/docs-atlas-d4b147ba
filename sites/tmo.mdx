@@ -1,0 +1,341 @@
+---
+title: TMO-H
+description: Site handler for TMOHentai using Crawl4AI with Gemini AI for intelligent image extraction
+---
+
+The TMO-H (TMOHentai) handler uses AI-powered extraction to intelligently detect and download manga images from complex JavaScript-heavy pages.
+
+## Supported URLs
+
+The handler recognizes TMOHentai chapter URLs:
+
+```
+https://tmohentai.com/contents/[manga-name]/[chapter-id]
+https://tmohentai.com/reader/[manga-name]/[chapter-id]
+https://tmohentai.com/reader/[manga-name]/[chapter-id]/paginated/1
+```
+
+<Note>
+The handler automatically converts URLs to cascade view for optimal extraction.
+</Note>
+
+## Extraction technology
+
+### Crawl4AI with Gemini AI
+
+TMO-H uses **Crawl4AI** with **Google Gemini 1.5 Flash** for intelligent image detection:
+
+```python
+llm_config = LLMConfig(
+    provider="gemini/gemini-1.5-flash", 
+    api_token=config.GOOGLE_API_KEY
+)
+
+instruction = """Extract all image URLs. Look for 'data-original' 
+and 'src'. Prioritize 'data-original'. Return JSON {'images': ['url1'...]}."""
+
+llm_strategy = LLMExtractionStrategy(
+    llm_config=llm_config, 
+    instruction=instruction
+)
+```
+
+Location: `~/workspace/source/core/sites/tmo.py:51-53`
+
+The AI model analyzes the page structure and intelligently extracts image URLs even when they're obfuscated or dynamically loaded.
+
+## URL transformation
+
+The handler converts different URL formats to cascade view:
+
+```python
+target_url = url
+if "/contents/" in url:
+    target_url = url.replace("/contents/", "/reader/") + "/cascade"
+elif "/paginated/" in url:
+    target_url = re.sub(r'/paginated/\d+', '/cascade', url)
+```
+
+Location: `~/workspace/source/core/sites/tmo.py:40-44`
+
+Cascade view loads all chapter images on a single page, making extraction more reliable.
+
+## Lazy loading script
+
+TMO-H pages use lazy loading with `data-original` attributes. The handler executes JavaScript to trigger image loading:
+
+```javascript
+(async () => {
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    let totalHeight = 0; 
+    let distance = 500;
+    while(totalHeight < document.body.scrollHeight) { 
+        window.scrollBy(0, distance); 
+        totalHeight += distance; 
+        await sleep(100); 
+    }
+    window.scrollTo(0, 0);
+    document.querySelectorAll('img[data-original]').forEach(img => { 
+        img.src = img.getAttribute('data-original'); 
+    });
+    await sleep(1000);
+})();
+```
+
+Location: `~/workspace/source/core/sites/tmo.py:56-65`
+
+This script:
+1. Scrolls down in 500px increments to trigger lazy loading
+2. Waits 100ms between scrolls
+3. Scrolls back to top
+4. Manually triggers `data-original` to `src` conversion
+5. Waits 1 second for rendering
+
+## AI extraction process
+
+The extraction happens in two phases:
+
+### Phase 1: AI parsing
+
+```python
+result = await crawler.arun(
+    target_url,
+    extraction_strategy=llm_strategy,
+    bypass_cache=True,
+    js_code=js_lazy_load,
+    wait_for="css:img.content-image"
+)
+
+if result.success:
+    if result.extracted_content:
+        clean = result.extracted_content
+        # Remove markdown code blocks
+        if "```json" in clean: 
+            clean = clean.split("```json")[1].split("```")[0].strip()
+        elif "```" in clean: 
+            clean = clean.split("```")[1].split("```")[0].strip()
+        image_urls = json.loads(clean).get("images", [])
+```
+
+Location: `~/workspace/source/core/sites/tmo.py:67-86`
+
+### Phase 2: Regex fallback
+
+If AI extraction fails or returns no results, regex fallback kicks in:
+
+```python
+if not image_urls and result.html:
+    matches = re.findall(
+        r'data-original=["\']https://[^"\']+\.(?:webp|jpg|png)["\']', 
+        result.html
+    )
+    if matches: 
+        image_urls = sorted(list(set(matches)))
+```
+
+Location: `~/workspace/source/core/sites/tmo.py:91-94`
+
+## Image filtering
+
+The handler filters out placeholder images:
+
+```python
+image_urls = [u for u in image_urls if "blank.gif" not in u]
+```
+
+Location: `~/workspace/source/core/sites/tmo.py:96`
+
+`blank.gif` is commonly used as a placeholder before lazy loading occurs.
+
+## Title extraction
+
+The handler attempts to extract the chapter title from the page:
+
+```python
+if result.html:
+    match = re.search(
+        r'<h1[^>]*class=["\'].*?reader-title.*?["\'][^>]*>(.*?)</h1>', 
+        result.html, 
+        re.IGNORECASE | re.DOTALL
+    )
+    if match:
+        safe = clean_filename(match.group(1).strip()).replace("\n", " ")
+        if safe: 
+            pdf_name = f"{safe}.pdf"
+```
+
+Location: `~/workspace/source/core/sites/tmo.py:102-106`
+
+If no title is found, it defaults to `"manga_tmo.pdf"`.
+
+## Headers and configuration
+
+TMO-H requires specific headers for image downloads:
+
+```python
+HEADERS_TMO = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Referer": "https://tmohentai.com/"
+}
+```
+
+These headers are passed to `download_and_make_pdf`.
+
+## Usage examples
+
+### Single chapter download
+
+```python
+from core.handler import process_url
+
+await process_url(
+    "https://tmohentai.com/contents/my-manga/chapter-1",
+    log_callback=print,
+    check_cancel=lambda: False,
+    progress_callback=lambda current, total: print(f"{current}/{total}")
+)
+```
+
+Output: `PDF/My Manga - Chapter 1.pdf`
+
+### Via web interface
+
+1. Start the web server: `START_WEB_VERSION.bat`
+2. Open http://localhost:3000
+3. Paste the TMOHentai URL
+4. Monitor real-time extraction progress
+
+### Via Discord bot
+
+```
+!descargar https://tmohentai.com/contents/my-manga/chapter-1
+```
+
+The bot will download and upload the PDF (or GoFile link if >8MB).
+
+## Implementation details
+
+### Class structure
+
+```python
+class TMOHandler(BaseSiteHandler):
+    @staticmethod
+    def get_supported_domains() -> list:
+        return ["tmohentai"]
+    
+    async def process(
+        self,
+        url: str,
+        log_callback: Callable[[str], None],
+        check_cancel: Callable[[], bool],
+        progress_callback: Optional[Callable[[int, int], None]] = None
+    ) -> None:
+        """Process TMOHentai URL using Gemini AI for extraction."""
+        ...
+```
+
+Location: `~/workspace/source/core/sites/tmo.py:18-32`
+
+### Domain matching
+
+The handler matches any domain containing `"tmohentai"`, allowing for different TLDs:
+
+- tmohentai.com
+- tmohentai.org
+- tmohentai.net (if mirrors exist)
+
+### Wait conditions
+
+The crawler waits for images to load before extraction:
+
+```python
+await crawler.arun(
+    target_url,
+    extraction_strategy=llm_strategy,
+    bypass_cache=True,
+    js_code=js_lazy_load,
+    wait_for="css:img.content-image"  # Wait for content images
+)
+```
+
+Location: `~/workspace/source/core/sites/tmo.py:67-74`
+
+## Known limitations
+
+<Warning>
+**Requires Google API key**: AI extraction requires `GOOGLE_API_KEY` in your `.env` file. Without it, only regex fallback will work.
+</Warning>
+
+### Single chapter only
+
+Unlike ZonaTMO, TMO-H does not support automatic series detection. You must provide individual chapter URLs.
+
+### Error handling
+
+```python
+try:
+    if result.extracted_content:
+        clean = result.extracted_content
+        if "```json" in clean: 
+            clean = clean.split("```json")[1].split("```")[0].strip()
+        image_urls = json.loads(clean).get("images", [])
+except Exception as e:
+    log_callback(f"[WARN] Error parsing AI response: {e}")
+```
+
+Location: `~/workspace/source/core/sites/tmo.py:79-88`
+
+If JSON parsing fails, the handler gracefully falls back to regex.
+
+## Performance characteristics
+
+- **Speed**: Fast (AI extraction is quick with Gemini Flash)
+- **Reliability**: Very high (AI + regex fallback)
+- **Resource usage**: Medium (LLM API calls)
+
+### Comparison with ZonaTMO
+
+| Feature | TMO-H | ZonaTMO |
+|---------|-------|----------|
+| Extraction method | AI + Regex | AI + Regex |
+| Series support | ✗ | ✓ |
+| Cascade view | ✓ | ✓ |
+| Lazy loading | ✓ | ✓ |
+| Scroll distance | 500px | 1000px |
+| Scroll delay | 100ms | 200ms |
+
+## Troubleshooting
+
+### No images found
+
+If extraction fails:
+
+1. Verify `GOOGLE_API_KEY` is set correctly
+2. Check if the URL format is correct
+3. Try visiting the URL manually to confirm it loads images
+4. Check logs for AI extraction errors
+
+### Incomplete downloads
+
+If some images are missing:
+
+1. The lazy loading script may need adjustment
+2. Try increasing scroll delays in the JS code
+3. Some images may be blocked by site protection
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="ZonaTMO" icon="book" href="/sites/zonatmo">
+    Compare with ZonaTMO's implementation
+  </Card>
+  <Card title="Configuration" icon="gear" href="/api/config">
+    Configure Google API key
+  </Card>
+  <Card title="M440" icon="globe" href="/sites/m440">
+    See a simpler crawler approach
+  </Card>
+  <Card title="Utils" icon="wrench" href="/api/utils">
+    Explore the PDF generation process
+  </Card>
+</CardGroup>

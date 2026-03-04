@@ -1,0 +1,121 @@
+---
+title: Handler module
+description: Central router for delegating manga downloads to site-specific handlers
+---
+
+The `handler` module acts as the main entry point for processing manga URLs. It parses incoming URLs and routes them to the appropriate site-specific handler based on the domain.
+
+## process_entry()
+
+Main router function that redirects download requests to the appropriate site handler based on the URL domain.
+
+```python
+async def process_entry(
+    url: str,
+    log_callback: Callable[[str], None],
+    check_cancel: Callable[[], bool],
+    progress_callback: Optional[Callable[[int, int], None]] = None
+) -> None
+```
+
+### Parameters
+
+<ParamField path="url" type="str" required>
+  The manga chapter or gallery URL submitted by the user.
+</ParamField>
+
+<ParamField path="log_callback" type="Callable[[str], None]" required>
+  Function to emit asynchronous log messages to the frontend. Accepts a string message as its parameter.
+</ParamField>
+
+<ParamField path="check_cancel" type="Callable[[], bool]" required>
+  Function returning a boolean to determine if the user cancelled the process. Returns `True` if cancelled.
+</ParamField>
+
+<ParamField path="progress_callback" type="Optional[Callable[[int, int], None]]">
+  Optional function to emit progress updates to the frontend. Receives `(current, total)` as parameters.
+</ParamField>
+
+### Returns
+
+<ResponseField name="return" type="None">
+  This is a side-effect function that drives the download processing. It does not return a value.
+</ResponseField>
+
+### Usage example
+
+```python
+from core.handler import process_entry
+
+def log_message(msg: str):
+    print(msg)
+
+def check_if_cancelled() -> bool:
+    return False  # Check your cancellation state
+
+def update_progress(current: int, total: int):
+    print(f"Progress: {current}/{total}")
+
+# Process a manga URL
+await process_entry(
+    url="https://lectortmo.com/viewer/12345/paginated",
+    log_callback=log_message,
+    check_cancel=check_if_cancelled,
+    progress_callback=update_progress
+)
+```
+
+## HANDLERS
+
+List of instantiated site-specific handler objects. Each handler implements the same interface with `get_supported_domains()` and `process()` methods.
+
+```python
+HANDLERS = [
+    TMOHandler(),
+    M440Handler(),
+    H2RHandler(),
+    HitomiHandler(),
+    NHentaiHandler(),
+    ZonaTMOHandler()
+]
+```
+
+You can access this list to see all available handlers or extend it with custom handlers.
+
+## Routing logic
+
+The handler uses a secure domain matching approach to route requests:
+
+1. **URL parsing**: Extracts the hostname from the provided URL using `urlparse()`
+2. **Domain validation**: Iterates through `HANDLERS` and checks if the hostname contains any supported domain
+3. **Handler delegation**: Calls the first matching handler's `process()` method
+4. **Error handling**: Returns an error message if no handler supports the domain
+
+### SSRF security validation
+
+The routing logic includes protection against Server-Side Request Forgery (SSRF) attacks:
+
+```python
+for handler in HANDLERS:
+    supported = handler.get_supported_domains()
+    if any(domain in hostname for domain in supported):
+        await handler.process(url, log_callback, check_cancel, progress_callback)
+        return
+```
+
+This approach validates that the domain exists within the extracted `hostname` rather than performing a simple substring search on the full URL. This prevents attackers from injecting malicious URLs like:
+
+```
+http://localhost:8000/api/admin?fake=tmohentai
+```
+
+The validation ensures HTTP requests only target officially supported manga site domains.
+
+## Error handling
+
+The module handles two main error scenarios:
+
+- **Invalid URL**: If the URL cannot be parsed, logs `[ERROR] Invalid URL provided.`
+- **Unsupported website**: If no handler matches the domain, logs `[ERROR] Unsupported website.`
+
+Both errors are communicated through the `log_callback` function and cause the process to exit gracefully.

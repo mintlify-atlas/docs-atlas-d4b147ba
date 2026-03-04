@@ -1,0 +1,307 @@
+---
+title: Installation
+description: Step-by-step guide to installing Universal Manga Downloader on your system
+---
+
+## Prerequisites
+
+Before installing Universal Manga Downloader, ensure your system meets these requirements:
+
+<Note>
+  **Python 3.10 or higher** is required. Check your version with `python --version` or `python3 --version`.
+</Note>
+
+- **Python 3.10+** with pip installed
+- **Git** for cloning the repository
+- **8GB RAM** recommended for browser automation
+- **500MB disk space** for dependencies and browser binaries
+
+### System compatibility
+
+- Windows 10/11
+- macOS 10.15+
+- Linux (Ubuntu 20.04+, Debian 11+, or equivalent)
+
+## Installation steps
+
+<Steps>
+  <Step title="Clone the repository">
+    Download the source code from GitHub:
+
+    ```bash
+    git clone https://github.com/Holkeano526/MangaDownloader.git
+    cd MangaDownloader
+    ```
+
+    <Info>
+      The repository is approximately 50MB. The clone operation may take 1-2 minutes depending on your connection speed.
+    </Info>
+  </Step>
+
+  <Step title="Install Python dependencies">
+    Install all required packages using pip:
+
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+    This will install the following core dependencies:
+
+    - `discord.py` - Discord bot integration
+    - `aiohttp` - Async HTTP client
+    - `Pillow` - Image processing
+    - `playwright` - Browser automation
+    - `crawl4ai` - Intelligent web scraping
+    - `python-dotenv` - Environment variable management
+    - `img2pdf` - PDF generation
+    - `fastapi` - Web API framework
+    - `uvicorn` - ASGI server
+    - `websockets` - Real-time communication
+
+    <Warning>
+      If you encounter permission errors on Linux/macOS, try using `pip3` instead of `pip`, or add `--user` flag: `pip install --user -r requirements.txt`
+    </Warning>
+  </Step>
+
+  <Step title="Install Playwright browsers">
+    Playwright requires browser binaries for automation. Install Chromium:
+
+    ```bash
+    playwright install chromium
+    ```
+
+    This downloads and configures the Chromium browser (~300MB). The process may take several minutes.
+
+    <Tip>
+      To save bandwidth and disk space, install only Chromium. The downloader doesn't require Firefox or WebKit.
+    </Tip>
+
+    If you need all browsers for development:
+
+    ```bash
+    playwright install
+    ```
+  </Step>
+
+  <Step title="Configure environment variables">
+    Create a `.env` file in the project root directory:
+
+    ```bash
+    touch .env
+    ```
+
+    Add your configuration:
+
+    ```ini .env
+    # Optional: Discord bot token (only needed for bot.py)
+    DISCORD_TOKEN=your_discord_token_here
+
+    # Optional: Run Playwright in headless mode (default: false)
+    HEADLESS=true
+
+    # Optional: Google API key (if needed by specific handlers)
+    GOOGLE_API_KEY=your_google_api_key
+    ```
+
+    <Note>
+      The `DISCORD_TOKEN` is only required if you plan to use the Discord bot deployment method. For web and desktop usage, you can leave the `.env` file empty or skip this step.
+    </Note>
+
+    **Configuration options explained:**
+
+    - `DISCORD_TOKEN` - Your Discord bot token from the [Discord Developer Portal](https://discord.com/developers/applications)
+    - `HEADLESS=true` - Runs browser automation invisibly (recommended for servers)
+    - `HEADLESS=false` - Shows browser window during scraping (useful for debugging)
+    - `GOOGLE_API_KEY` - Optional API key for enhanced features
+  </Step>
+
+  <Step title="Verify installation">
+    Test that all components are properly installed:
+
+    <CodeGroup>
+      ```bash Python version
+      python --version
+      # Expected output: Python 3.10.x or higher
+      ```
+
+      ```bash Dependencies
+      pip list | grep -E "(fastapi|playwright|crawl4ai|aiohttp)"
+      # Should show installed versions of key packages
+      ```
+
+      ```bash Playwright
+      playwright --version
+      # Expected output: Version 1.x.x
+      ```
+    </CodeGroup>
+
+    Run a quick health check:
+
+    ```bash
+    python -c "import core; print('Core module loaded successfully')"
+    ```
+
+    Expected output:
+    ```
+    Core module loaded successfully
+    ```
+
+    <Warning>
+      If you see `ModuleNotFoundError`, ensure you're in the correct directory and all dependencies were installed successfully. Try running `pip install -r requirements.txt` again.
+    </Warning>
+  </Step>
+</Steps>
+
+## Directory structure
+
+After installation, your project directory should look like this:
+
+```
+MangaDownloader/
+├── .env                    # Your environment configuration
+├── requirements.txt        # Python dependencies
+├── core/                   # Core engine package
+│   ├── sites/             # Site-specific handlers
+│   ├── config.py          # Configuration management
+│   ├── handler.py         # Main routing logic
+│   └── utils.py           # Utility functions
+├── web_client_next/       # Next.js frontend
+├── app.py                 # Desktop GUI application
+├── bot.py                 # Discord bot
+├── web_server.py          # FastAPI backend
+└── PDF/                   # Output directory (auto-created)
+```
+
+<Info>
+  The `PDF/` directory will be automatically created when you download your first manga. This is where all generated PDFs are stored.
+</Info>
+
+## Optional: Install Node.js dependencies
+
+If you plan to use or develop the web interface, install the Next.js dependencies:
+
+<Steps>
+  <Step title="Ensure Node.js is installed">
+    The web interface requires Node.js 18+ and npm:
+
+    ```bash
+    node --version  # Should be v18.0.0 or higher
+    npm --version
+    ```
+
+    If not installed, download from [nodejs.org](https://nodejs.org/).
+  </Step>
+
+  <Step title="Install frontend dependencies">
+    Navigate to the web client directory and install:
+
+    ```bash
+    cd web_client_next
+    npm install
+    cd ..
+    ```
+  </Step>
+</Steps>
+
+<Tip>
+  The `START_WEB_VERSION.bat` launcher will automatically handle frontend setup on Windows. Manual installation is only needed for development or Linux/macOS deployment.
+</Tip>
+
+## Troubleshooting
+
+### Python not found
+
+If you see `python: command not found`, try using `python3` instead:
+
+```bash
+python3 --version
+python3 -m pip install -r requirements.txt
+```
+
+### Permission errors on Linux/macOS
+
+Add `--user` flag to install in your home directory:
+
+```bash
+pip install --user -r requirements.txt
+playwright install chromium
+```
+
+### Playwright installation fails
+
+If Playwright installation fails, try installing system dependencies first:
+
+<CodeGroup>
+  ```bash Ubuntu/Debian
+  sudo apt-get update
+  sudo apt-get install -y libglib2.0-0 libnss3 libnspr4 libdbus-1-3 \
+    libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 \
+    libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 \
+    libcairo2 libasound2
+  ```
+
+  ```bash Fedora/RHEL
+  sudo dnf install -y glib2 nss nspr atk at-spi2-atk cups-libs libdrm \
+    libxkbcommon libXcomposite libXdamage libXrandr mesa-libgbm pango cairo alsa-lib
+  ```
+
+  ```bash macOS
+  # Usually no additional dependencies needed
+  # If issues persist, try reinstalling with Homebrew:
+  brew reinstall python@3.10
+  ```
+</CodeGroup>
+
+Then retry:
+
+```bash
+playwright install chromium
+```
+
+### Import errors
+
+If you see `ModuleNotFoundError: No module named 'core'`, ensure you're running commands from the project root directory:
+
+```bash
+cd MangaDownloader  # Ensure you're in the right directory
+pwd                 # Should show path ending in /MangaDownloader
+python app.py       # Now run your command
+```
+
+### crawl4ai installation issues
+
+If `crawl4ai` fails to install, you may need to install build tools:
+
+<CodeGroup>
+  ```bash Ubuntu/Debian
+  sudo apt-get install build-essential python3-dev
+  ```
+
+  ```bash macOS
+  xcode-select --install
+  ```
+
+  ```bash Windows
+  # Install Visual C++ Build Tools from:
+  # https://visualstudio.microsoft.com/visual-cpp-build-tools/
+  ```
+</CodeGroup>
+
+## Next steps
+
+Now that you have Universal Manga Downloader installed, you're ready to download your first manga!
+
+<CardGroup cols={2}>
+  <Card title="Quick start" icon="rocket" href="/quickstart">
+    Download your first manga in 5 minutes
+  </Card>
+  <Card title="Web deployment" icon="browser" href="/deployment/web-app">
+    Set up the modern web interface
+  </Card>
+  <Card title="Desktop app" icon="desktop" href="/deployment/desktop-app">
+    Launch the standalone GUI
+  </Card>
+  <Card title="Core concepts" icon="lightbulb" href="/concepts/architecture">
+    Learn about the architecture
+  </Card>
+</CardGroup>

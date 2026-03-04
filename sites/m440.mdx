@@ -1,0 +1,419 @@
+---
+title: M440
+description: Site handler for M440.in and Mangas.in using Crawl4AI with simple regex extraction
+---
+
+The M440 handler provides a lightweight extraction method for M440.in and Mangas.in using simple HTML parsing without AI assistance.
+
+## Supported domains
+
+The handler supports multiple domains:
+
+```python
+@staticmethod
+def get_supported_domains() -> list:
+    return ["m440.in", "mangas.in"]
+```
+
+Location: `~/workspace/source/core/sites/m440.py:18-20`
+
+### URL patterns
+
+**Single chapter:**
+```
+https://m440.in/manga/[series-name]/[chapter-id]
+https://mangas.in/manga/[series-name]/[chapter-id]
+```
+
+**Series cover:**
+```
+https://m440.in/manga/[series-name]
+https://mangas.in/manga/[series-name]
+```
+
+## Extraction technology
+
+### Simple Crawl4AI
+
+M440 uses **Crawl4AI** without AI assistance, relying on straightforward regex extraction:
+
+```python
+async with AsyncWebCrawler(verbose=True) as crawler:
+    result = await crawler.arun(url=url, bypass_cache=True)
+    if not result.success:
+        log_callback(f"[ERROR] Page load failed: {result.error_message}")
+        return
+    
+    html = result.html
+    matches = re.findall(r'data-src=["\']https://[^"\']+)["\']', html)
+```
+
+Location: `~/workspace/source/core/sites/m440.py:32-36,131`
+
+This approach is:
+- Faster than AI extraction
+- More reliable for simple HTML structures
+- Requires no API keys
+- Uses less CPU and memory
+
+## Cover detection
+
+The handler intelligently detects whether a URL is a cover page or single chapter:
+
+```python
+clean_url = url.split("?")[0].rstrip("/")
+is_cover_page = bool(re.search(r'/manga/[^/]+$', clean_url))
+
+if not is_cover_page:
+    # Check if there are many chapter links
+    potential_chapters = re.findall(
+        r'href=["\']https://m440.in/manga/[^/]+/[^"\']+)["\']', 
+        html
+    )
+    if len(set(potential_chapters)) > 3: 
+        is_cover_page = True
+```
+
+Location: `~/workspace/source/core/sites/m440.py:39-44`
+
+A page is considered a cover if:
+1. URL ends with `/manga/[series-name]` (no chapter path)
+2. OR it contains more than 3 unique chapter links
+
+## Series download
+
+When a cover page is detected, the handler downloads all chapters:
+
+### Title extraction
+
+```python
+manga_title = "Manga_M440"
+title_match = re.search(
+    r'<h2[^>]*class=["\']widget-title["\'][^>]*>(.*?)</h2>', 
+    html
+)
+if title_match: 
+    manga_title = clean_filename(title_match.group(1).strip())
+```
+
+Location: `~/workspace/source/core/sites/m440.py:48-51`
+
+### Chapter extraction
+
+```python
+links = re.findall(
+    r'href=["\']https://m440.in/manga/[^/]+/[^"\']+)["\']', 
+    html
+)
+
+seen = set()
+clean_links = []
+for l in links:
+    if l not in seen and "/manga/" in l and l != url:
+        seen.add(l)
+        clean_links.append(l)
+
+clean_links.reverse()  # Oldest to newest
+```
+
+Location: `~/workspace/source/core/sites/m440.py:53-60`
+
+The handler:
+1. Extracts all chapter URLs
+2. Removes duplicates while preserving order
+3. Filters out the current URL
+4. Reverses to start with chapter 1
+
+### Batch processing
+
+```python
+pdf_dir = os.path.join(os.getcwd(), config.PDF_FOLDER_NAME, manga_title)
+os.makedirs(pdf_dir, exist_ok=True)
+
+for i, chap_url in enumerate(clean_links):
+    if check_cancel and check_cancel(): 
+        break
+    if progress_callback: 
+        progress_callback(i + 1, len(clean_links))
+    
+    log_callback(f"Processing Cap {i+1}/{len(clean_links)}")
+    
+    pdf_name = f"{manga_title} - {chap_url.split('/')[-1]}.pdf"
+    full_pdf_path = os.path.join(pdf_dir, pdf_name)
+    
+    if os.path.exists(full_pdf_path): 
+        continue
+    
+    await self._process_chapter(
+        chap_url, 
+        full_pdf_path, 
+        crawler, 
+        log_callback, 
+        check_cancel, 
+        None
+    )
+```
+
+Location: `~/workspace/source/core/sites/m440.py:68-81`
+
+Features:
+- Creates series-specific folder
+- Skips already-downloaded chapters
+- Respects cancellation requests
+- Reports progress per chapter
+
+## Image extraction
+
+M440 uses `data-src` attributes for lazy-loaded images:
+
+```python
+async def _process_chapter(
+    self, 
+    url: str, 
+    output_pdf_path: str, 
+    crawler: AsyncWebCrawler, 
+    log_callback: Callable[[str], None], 
+    check_cancel: Callable[[], bool], 
+    progress_callback: Optional[Callable[[int, int], None]] = None
+) -> None:
+    result = await crawler.arun(url=url, bypass_cache=True)
+    if not result.success: 
+        return
+    
+    html = result.html
+    matches = re.findall(r'data-src=["\']https://[^"\']+)["\']', html)
+    
+    if matches:
+        images = list(dict.fromkeys(matches))  # Remove duplicates
+        log_callback(f"[INFO] Downloading {len(images)} images...")
+        
+        await download_and_make_pdf(
+            images, 
+            output_pdf_path, 
+            config.HEADERS_M440, 
+            log_callback, 
+            check_cancel, 
+            progress_callback, 
+            is_path=True,
+            open_result=config.OPEN_RESULT_ON_FINISH
+        )
+```
+
+Location: `~/workspace/source/core/sites/m440.py:111-144`
+
+### Deduplication
+
+The handler uses `dict.fromkeys()` to remove duplicate URLs while preserving order:
+
+```python
+images = list(dict.fromkeys(matches))
+```
+
+This is more efficient than:
+```python
+images = list(set(matches))  # Order not preserved
+```
+
+## Headers and configuration
+
+M440 requires specific headers for image downloads:
+
+```python
+HEADERS_M440 = {
+    "User-Agent": "Mozilla/5.0 ...",
+    "Referer": "https://m440.in/"
+}
+```
+
+Defined in `config.py` and passed to the download utility.
+
+## Usage examples
+
+### Single chapter
+
+```python
+from core.handler import process_url
+
+await process_url(
+    "https://m440.in/manga/one-piece/chapter-1000",
+    log_callback=print,
+    check_cancel=lambda: False
+)
+```
+
+Output: `PDF/m440_chapter.pdf`
+
+### Full series
+
+```python
+await process_url(
+    "https://m440.in/manga/one-piece",
+    log_callback=print,
+    check_cancel=lambda: False,
+    progress_callback=lambda current, total: print(f"Chapter {current}/{total}")
+)
+```
+
+Output:
+```
+PDF/
+└── One Piece/
+    ├── One Piece - chapter-1.pdf
+    ├── One Piece - chapter-2.pdf
+    └── One Piece - chapter-3.pdf
+```
+
+### Via web interface
+
+1. Launch: `START_WEB_VERSION.bat`
+2. Open: http://localhost:3000
+3. Paste URL: `https://m440.in/manga/my-manga`
+4. Watch progress in real-time
+
+## Implementation details
+
+### Class structure
+
+```python
+class M440Handler(BaseSiteHandler):
+    @staticmethod
+    def get_supported_domains() -> list:
+        return ["m440.in", "mangas.in"]
+    
+    async def process(self, url, log_callback, check_cancel, progress_callback):
+        """Process M440.in URL."""
+        ...
+    
+    async def _process_chapter(self, url, output_pdf_path, crawler, ...):
+        """Helper to process a single chapter."""
+        ...
+```
+
+Location: `~/workspace/source/core/sites/m440.py:15-145`
+
+### Reusing crawler instance
+
+For series downloads, the handler reuses the same `AsyncWebCrawler` instance:
+
+```python
+async with AsyncWebCrawler(verbose=True) as crawler:
+    result = await crawler.arun(url=url, bypass_cache=True)
+    # ... cover page processing ...
+    
+    for i, chap_url in enumerate(clean_links):
+        await self._process_chapter(
+            chap_url, 
+            full_pdf_path, 
+            crawler,  # Reuse instance
+            ...
+        )
+```
+
+Location: `~/workspace/source/core/sites/m440.py:32,81`
+
+This improves performance by avoiding repeated browser initialization.
+
+## Known limitations
+
+### No lazy loading script
+
+Unlike ZonaTMO and TMO-H, M440 doesn't execute JavaScript to trigger lazy loading. This works because M440's `data-src` attributes are present in the initial HTML.
+
+### Chapter naming
+
+Chapters are named using the URL slug:
+
+```python
+pdf_name = f"{manga_title} - {chap_url.split('/')[-1]}.pdf"
+```
+
+Location: `~/workspace/source/core/sites/m440.py:76`
+
+For example:
+- URL: `https://m440.in/manga/one-piece/chapter-1000`
+- Output: `One Piece - chapter-1000.pdf`
+
+This preserves the site's chapter naming convention.
+
+### Skip existing files
+
+The handler skips already-downloaded chapters:
+
+```python
+if os.path.exists(full_pdf_path): 
+    continue
+```
+
+Location: `~/workspace/source/core/sites/m440.py:79`
+
+<Note>
+This allows you to resume interrupted series downloads without re-downloading existing chapters.
+</Note>
+
+## Performance characteristics
+
+- **Speed**: Very fast (no AI processing)
+- **Reliability**: High (simple regex)
+- **Resource usage**: Low (minimal CPU/memory)
+- **Best for**: Large series downloads
+
+### Comparison with other handlers
+
+| Handler | Extraction | Speed | API Required |
+|---------|------------|-------|-------------|
+| M440 | Regex | Fast | No |
+| ZonaTMO | AI + Regex | Medium | Yes |
+| TMO-H | AI + Regex | Medium | Yes |
+| H2R | JSON | Fastest | No |
+
+## Troubleshooting
+
+### No chapters found
+
+If cover detection fails:
+
+1. Verify the URL is correct
+2. Check if the site structure has changed
+3. Manually inspect the page HTML
+4. Try a different manga series
+
+### Missing images
+
+If some images don't download:
+
+1. Check if headers are correct in `config.py`
+2. Verify the regex pattern matches `data-src` format
+3. Some images may require additional authentication
+
+### Auto-open not working
+
+On Linux/Mac, `os.startfile()` is not available:
+
+```python
+if config.OPEN_RESULT_ON_FINISH:
+    try: 
+        os.startfile(pdf_dir)
+    except: 
+        pass
+```
+
+Location: `~/workspace/source/core/sites/m440.py:83-85`
+
+You'll need to manually open the output folder.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Hentai2Read" icon="flash" href="/sites/h2r">
+    Even faster JSON-based extraction
+  </Card>
+  <Card title="ZonaTMO" icon="wand-magic-sparkles" href="/sites/zonatmo">
+    Compare with AI-powered approach
+  </Card>
+  <Card title="Configuration" icon="gear" href="/api/config">
+    Configure headers and paths
+  </Card>
+  <Card title="Utils" icon="wrench" href="/api/utils">
+    Learn about download_and_make_pdf
+  </Card>
+</CardGroup>

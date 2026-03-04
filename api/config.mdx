@@ -1,0 +1,213 @@
+---
+title: Config module
+description: Configuration variables and runtime settings for the manga downloader
+---
+
+The `config` module centralizes all configuration settings for the Universal Manga Downloader. It loads environment variables and defines constants used throughout the application.
+
+## Environment loading
+
+The module uses `python-dotenv` to load environment variables from a `.env` file:
+
+```python
+from dotenv import load_dotenv
+load_dotenv()
+```
+
+## API keys and tokens
+
+### GOOGLE_API_KEY
+
+API key for Google services integration. Loaded from the `GOOGLE_API_KEY` environment variable.
+
+```python
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+```
+
+If not found in the environment, a warning is printed: `[WARN] GOOGLE_API_KEY not found in .env`
+
+### DISCORD_TOKEN
+
+Optional Discord bot token for Discord integration features.
+
+```python
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+```
+
+## Browser identity
+
+### USER_AGENT
+
+User agent string used to identify the downloader as a standard web browser. This helps bypass basic bot detection:
+
+```python
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+```
+
+## HTTP headers
+
+Site-specific header configurations for bypassing protection mechanisms:
+
+### HEADERS_TMO
+
+Headers for TMO Hentai requests:
+
+```python
+HEADERS_TMO = {
+    "Referer": "https://tmohentai.com/",
+    "User-Agent": USER_AGENT
+}
+```
+
+### HEADERS_M440
+
+Headers for M440 requests:
+
+```python
+HEADERS_M440 = {
+    "Referer": "https://m440.in/",
+    "User-Agent": USER_AGENT
+}
+```
+
+### HEADERS_H2R
+
+Headers for Hentai2Read requests:
+
+```python
+HEADERS_H2R = {
+    "Referer": "https://hentai2read.com/",
+    "User-Agent": USER_AGENT
+}
+```
+
+### HEADERS_HITOMI
+
+Headers for Hitomi.la requests:
+
+```python
+HEADERS_HITOMI = {
+    "Referer": "https://hitomi.la/",
+    "User-Agent": USER_AGENT
+}
+```
+
+### HEADERS_ZONATMO
+
+Headers for ZonaTMO requests:
+
+```python
+HEADERS_ZONATMO = {
+    "Referer": "https://zonatmo.com/",
+    "User-Agent": USER_AGENT
+}
+```
+
+### HEADERS_NHENTAI
+
+Headers for NHentai requests:
+
+```python
+HEADERS_NHENTAI = {
+    "User-Agent": USER_AGENT
+}
+```
+
+## Folder names
+
+### PDF_FOLDER_NAME
+
+Name of the directory where generated PDF files are saved:
+
+```python
+PDF_FOLDER_NAME = "PDF"
+```
+
+### TEMP_FOLDER_NAME
+
+Name of the temporary directory used for downloading images before PDF compilation:
+
+```python
+TEMP_FOLDER_NAME = "temp_manga_images"
+```
+
+## Download settings
+
+### BATCH_SIZE
+
+Number of images to download concurrently in each batch. Controls the parallelism of image downloads:
+
+```python
+BATCH_SIZE = 10
+```
+
+Higher values increase download speed but consume more memory and network resources.
+
+### DEFAULT_PAGE_COUNT
+
+Default expected page count for manga chapters when the actual count is unknown:
+
+```python
+DEFAULT_PAGE_COUNT = 60
+```
+
+## Runtime flags
+
+### OPEN_RESULT_ON_FINISH
+
+Boolean flag controlling whether to automatically open the PDF file and its containing folder after successful generation:
+
+```python
+OPEN_RESULT_ON_FINISH = True
+```
+
+- `True`: Automatically opens the PDF folder and file (Windows only)
+- `False`: Completes silently without opening files
+
+## Modifying configuration at runtime
+
+You can modify configuration values at runtime by importing and reassigning them:
+
+```python
+from core import config
+
+# Change batch size for faster downloads
+config.BATCH_SIZE = 20
+
+# Disable automatic file opening
+config.OPEN_RESULT_ON_FINISH = False
+
+# Use custom folder names
+config.PDF_FOLDER_NAME = "downloads/manga"
+config.TEMP_FOLDER_NAME = "temp_downloads"
+```
+
+<Warning>
+  Changes to configuration values only affect operations that occur after the modification. Already-running downloads will use the original values.
+</Warning>
+
+## Usage example
+
+```python
+from core.config import (
+    HEADERS_TMO,
+    PDF_FOLDER_NAME,
+    BATCH_SIZE,
+    OPEN_RESULT_ON_FINISH
+)
+
+# Use headers for requests
+import aiohttp
+async with aiohttp.ClientSession(headers=HEADERS_TMO) as session:
+    async with session.get(url) as response:
+        content = await response.read()
+
+# Construct output path
+import os
+output_path = os.path.join(os.getcwd(), PDF_FOLDER_NAME, "manga.pdf")
+
+# Use batch size for concurrent downloads
+for i in range(0, len(urls), BATCH_SIZE):
+    batch = urls[i:i+BATCH_SIZE]
+    # Process batch...
+```

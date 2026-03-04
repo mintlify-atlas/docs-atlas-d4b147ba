@@ -1,0 +1,607 @@
+---
+title: Docker deployment
+description: Deploy the Universal Manga Downloader using Docker Compose for production environments
+---
+
+Docker deployment provides a containerized, production-ready setup with isolated services and easy scaling.
+
+## Overview
+
+The Docker setup includes:
+- **Backend container**: FastAPI server with Playwright
+- **Frontend container**: Next.js web client
+- **Volume mounts**: Persistent PDF storage
+- **Automatic restarts**: Service resilience
+
+## Prerequisites
+
+<Steps>
+  <Step title="Install Docker">
+    - **Linux**: Follow [Docker Engine installation](https://docs.docker.com/engine/install/)
+    - **Windows/Mac**: Install [Docker Desktop](https://www.docker.com/products/docker-desktop)
+  </Step>
+
+  <Step title="Install Docker Compose">
+    Docker Compose is included with Docker Desktop. For Linux:
+    ```bash
+    sudo apt-get install docker-compose-plugin
+    ```
+  </Step>
+
+  <Step title="Verify installation">
+    ```bash
+    docker --version
+    docker compose version
+    ```
+  </Step>
+</Steps>
+
+## Quick start
+
+<Steps>
+  <Step title="Clone or navigate to project directory">
+    ```bash
+    cd /path/to/universal-manga-downloader
+    ```
+  </Step>
+
+  <Step title="Create environment file">
+    ```bash
+    cp .env.example .env
+    ```
+
+    Edit `.env` if needed:
+    ```bash .env
+    # Optional: Google API key for enhanced scraping
+    GOOGLE_API_KEY=your_api_key_here
+    ```
+  </Step>
+
+  <Step title="Launch with Docker Compose">
+    ```bash
+    docker compose up -d
+    ```
+
+    This will:
+    1. Build the backend image
+    2. Build the frontend image
+    3. Start both containers in detached mode
+    4. Create volume mounts for PDF storage
+  </Step>
+
+  <Step title="Access the application">
+    Open your browser to:
+    ```
+    http://localhost:3000
+    ```
+  </Step>
+</Steps>
+
+<Info>
+  The `-d` flag runs containers in the background. Omit it to see real-time logs.
+</Info>
+
+## Docker Compose configuration
+
+The `docker-compose.yml` file defines the multi-container setup:
+
+```yaml docker-compose.yml
+version: '3.8'
+
+services:
+  backend:
+    build: .
+    container_name: manga_backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./PDF:/app/PDF
+      - ./.env:/app/.env
+    restart: unless-stopped
+    command: python web_server.py
+
+  frontend:
+    build:
+      context: ./web_client_next
+      dockerfile: Dockerfile
+    container_name: manga_frontend
+    ports:
+      - "3000:3000" # Next.js exposed on port 3000
+    depends_on:
+      - backend
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+```
+
+### Service breakdown
+
+#### Backend service
+
+```yaml
+backend:
+  build: .                    # Use Dockerfile in project root
+  container_name: manga_backend
+  ports:
+    - "8000:8000"             # Expose FastAPI server
+  volumes:
+    - ./PDF:/app/PDF          # Persistent PDF storage
+    - ./.env:/app/.env        # Environment variables
+  restart: unless-stopped     # Auto-restart on failure
+  command: python web_server.py
+```
+
+<Note>
+  The backend container runs `web_server.py` which starts the FastAPI server on port 8000.
+</Note>
+
+#### Frontend service
+
+```yaml
+frontend:
+  build:
+    context: ./web_client_next
+    dockerfile: Dockerfile
+  container_name: manga_frontend
+  ports:
+    - "3000:3000"             # Expose Next.js app
+  depends_on:
+    - backend                  # Wait for backend to start
+  restart: unless-stopped
+  environment:
+    - NODE_ENV=production
+```
+
+## Dockerfile
+
+The backend Dockerfile sets up the Python environment:
+
+```dockerfile Dockerfile
+# Python base image
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    wget \
+    gnupg \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+
+# Install Python deps
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Install Playwright browsers
+RUN playwright install chromium
+RUN playwright install-deps
+
+# Copy app code
+COPY . .
+
+# Expose port (FastAPI default)
+EXPOSE 8000
+
+# Run the server
+CMD ["python", "web_server.py"]
+```
+
+### Key components
+
+| Layer | Purpose |
+|-------|--------|
+| `python:3.10-slim` | Lightweight Python base image |
+| `apt-get install` | System dependencies for Playwright |
+| `pip install` | Python packages from requirements.txt |
+| `playwright install` | Download Chromium browser |
+| `COPY . .` | Application code |
+| `EXPOSE 8000` | Document port usage |
+| `CMD` | Default startup command |
+
+<Warning>
+  The Playwright browser installation (`playwright install chromium`) adds ~200MB to the image. This is necessary for web scraping functionality.
+</Warning>
+
+## Volume mounts
+
+### PDF storage
+
+```yaml
+volumes:
+  - ./PDF:/app/PDF
+```
+
+This mounts the host's `PDF/` directory to `/app/PDF` in the container, ensuring:
+- PDFs persist after container restarts
+- Files are accessible from the host system
+- No data loss during updates
+
+### Environment variables
+
+```yaml
+volumes:
+  - ./.env:/app/.env
+```
+
+Mounts the `.env` file for configuration without rebuilding the image.
+
+<Tip>
+  You can also use Docker Compose's `env_file` directive:
+  ```yaml
+  env_file:
+    - .env
+  ```
+</Tip>
+
+## Port mappings
+
+| Service | Container Port | Host Port | Configurable |
+|---------|---------------|-----------|-------------|
+| Backend | 8000 | 8000 | Yes |
+| Frontend | 3000 | 3000 | Yes |
+
+### Changing ports
+
+To change the exposed ports, modify `docker-compose.yml`:
+
+```yaml
+ports:
+  - "8080:8000"  # Backend accessible on host port 8080
+```
+
+```yaml
+ports:
+  - "3001:3000"  # Frontend accessible on host port 3001
+```
+
+<Note>
+  If you change the backend port, update the frontend's API endpoint configuration to match.
+</Note>
+
+## Managing containers
+
+### Start services
+
+```bash
+docker compose up -d
+```
+
+### Stop services
+
+```bash
+docker compose down
+```
+
+### View logs
+
+<CodeGroup>
+  ```bash All services
+  docker compose logs -f
+  ```
+
+  ```bash Backend only
+  docker compose logs -f backend
+  ```
+
+  ```bash Frontend only
+  docker compose logs -f frontend
+  ```
+</CodeGroup>
+
+### Restart services
+
+```bash
+docker compose restart
+```
+
+### Rebuild images
+
+After code changes:
+
+```bash
+docker compose up -d --build
+```
+
+<Tip>
+  Use `--build` to force rebuild of images when you update application code or dependencies.
+</Tip>
+
+### Remove containers and volumes
+
+```bash
+docker compose down -v
+```
+
+<Warning>
+  The `-v` flag deletes volumes, including PDF files. Omit it to preserve data.
+</Warning>
+
+## Production considerations
+
+### Environment variables
+
+For production, use Docker secrets or external secret management:
+
+```yaml
+services:
+  backend:
+    environment:
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+```
+
+### Resource limits
+
+Add resource constraints to prevent memory exhaustion:
+
+```yaml
+services:
+  backend:
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+```
+
+<Note>
+  Adjust limits based on your server capacity and expected load. Image processing is memory-intensive.
+</Note>
+
+### Health checks
+
+Add health checks for better reliability:
+
+```yaml
+services:
+  backend:
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/pdfs/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+```
+
+### Logging
+
+Configure log rotation to prevent disk space issues:
+
+```yaml
+services:
+  backend:
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+```
+
+### Networks
+
+Create a custom network for service isolation:
+
+```yaml
+services:
+  backend:
+    networks:
+      - manga-network
+
+  frontend:
+    networks:
+      - manga-network
+
+networks:
+  manga-network:
+    driver: bridge
+```
+
+### Reverse proxy
+
+For production, use Nginx or Traefik as a reverse proxy:
+
+```yaml docker-compose.yml
+services:
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - backend
+      - frontend
+    restart: unless-stopped
+```
+
+<Tip>
+  Use Traefik for automatic SSL certificate management with Let's Encrypt.
+</Tip>
+
+## Scaling
+
+### Multiple backend instances
+
+Scale the backend for higher throughput:
+
+```bash
+docker compose up -d --scale backend=3
+```
+
+Combine with a load balancer:
+
+```yaml
+services:
+  backend:
+    deploy:
+      replicas: 3
+```
+
+<Warning>
+  Scaling the backend requires shared PDF storage (NFS, S3, etc.) and session management.
+</Warning>
+
+## Troubleshooting
+
+### Build fails with Playwright errors
+
+**Issue**: Playwright browser installation fails
+
+**Solution**: Increase Docker memory allocation (Docker Desktop → Settings → Resources → Memory → 4GB+)
+
+### Container exits immediately
+
+**Issue**: Missing dependencies or configuration errors
+
+**Solution**: Check logs:
+```bash
+docker compose logs backend
+```
+
+### "Port already in use" error
+
+**Issue**: Another service is using port 8000 or 3000
+
+**Solution**: 
+- Stop the conflicting service
+- Or change the port mapping in `docker-compose.yml`
+
+### PDFs not persisting
+
+**Issue**: Volume mount not configured correctly
+
+**Solution**: Verify the mount in `docker-compose.yml`:
+```bash
+docker compose config  # Validate configuration
+ls -la ./PDF           # Check host directory exists
+```
+
+### Frontend can't connect to backend
+
+**Issue**: Network configuration or CORS policy
+
+**Solution**:
+1. Verify both containers are on the same network:
+   ```bash
+   docker network inspect universal-manga-downloader_default
+   ```
+2. Update CORS policy in `web_server.py` to include the frontend container name
+3. Check that `depends_on` is correctly set in frontend service
+
+### Out of disk space
+
+**Issue**: Docker images and logs consuming disk space
+
+**Solution**: Clean up unused resources:
+```bash
+docker system prune -a --volumes
+```
+
+<Warning>
+  This removes all unused containers, networks, images, and volumes. Use with caution.
+</Warning>
+
+## Performance optimization
+
+### Image size reduction
+
+Optimize the Dockerfile for smaller images:
+
+```dockerfile
+# Multi-stage build example
+FROM python:3.10-slim as builder
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir --user -r requirements.txt
+
+FROM python:3.10-slim
+WORKDIR /app
+COPY --from=builder /root/.local /root/.local
+COPY . .
+ENV PATH=/root/.local/bin:$PATH
+CMD ["python", "web_server.py"]
+```
+
+### Build caching
+
+Order Dockerfile commands to maximize cache hits:
+
+1. System dependencies (rarely change)
+2. Python dependencies (change occasionally)
+3. Application code (change frequently)
+
+### Shared volumes for efficiency
+
+```yaml
+volumes:
+  pdf-storage:
+    driver: local
+
+services:
+  backend:
+    volumes:
+      - pdf-storage:/app/PDF
+```
+
+## Security
+
+### Non-root user
+
+Run containers as non-root:
+
+```dockerfile
+RUN useradd -m -u 1000 appuser
+USER appuser
+```
+
+### Read-only filesystem
+
+```yaml
+services:
+  backend:
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/PDF
+```
+
+### Secret management
+
+Use Docker secrets for sensitive data:
+
+```yaml
+secrets:
+  discord_token:
+    file: ./secrets/discord_token.txt
+
+services:
+  backend:
+    secrets:
+      - discord_token
+```
+
+<Info>
+  Docker secrets are only available in Swarm mode. For Compose-only deployments, use environment variables with caution.
+</Info>
+
+## Comparison with other deployment methods
+
+| Aspect | Docker | Web App (Manual) | Desktop App |
+|--------|--------|-----------------|-------------|
+| **Setup time** | Medium | High | Low |
+| **Portability** | Excellent | Poor | Poor |
+| **Isolation** | Yes | No | No |
+| **Updates** | Easy (rebuild) | Manual | Manual |
+| **Resource usage** | Higher | Lower | Lower |
+| **Multi-server** | Easy (orchestration) | Complex | N/A |
+| **Production ready** | Yes | Requires setup | No |
+
+<Tip>
+  Docker is ideal for production deployments, development consistency, and multi-environment setups.
+</Tip>

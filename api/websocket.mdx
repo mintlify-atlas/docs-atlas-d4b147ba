@@ -1,0 +1,224 @@
+---
+title: WebSocket API
+description: Real-time communication for manga download progress and control
+---
+
+The WebSocket endpoint provides real-time bidirectional communication for starting downloads, receiving progress updates, viewing logs, and canceling operations.
+
+## Connection
+
+Connect to the WebSocket endpoint at:
+
+```
+ws://localhost:8000/ws
+```
+
+The server accepts the connection immediately and waits for commands.
+
+## Request format
+
+Send JSON messages to control the download process:
+
+### Start download
+
+<ParamField body="command" type="string" required>
+  Set to `"start"` to begin a manga download
+</ParamField>
+
+<ParamField body="url" type="string" required>
+  The manga URL to download
+</ParamField>
+
+<RequestExample>
+```json Start download
+{
+  "command": "start",
+  "url": "https://mangadex.org/title/abc123"
+}
+```
+</RequestExample>
+
+### Cancel download
+
+<ParamField body="command" type="string" required>
+  Set to `"cancel"` to stop the current download
+</ParamField>
+
+<RequestExample>
+```json Cancel download
+{
+  "command": "cancel"
+}
+```
+</RequestExample>
+
+## Response messages
+
+The server sends JSON messages with different types to communicate status, progress, logs, and errors.
+
+### Status message
+
+Indicates the current state of the download process.
+
+<ResponseField name="type" type="string">
+  Set to `"status"`
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  Current status: `"running"`, `"completed"`, or `"error"`
+</ResponseField>
+
+<ResponseField name="filename" type="string">
+  The generated PDF filename (only present when status is `"completed"`)
+</ResponseField>
+
+<ResponseExample>
+```json Running
+{
+  "type": "status",
+  "status": "running"
+}
+```
+</ResponseExample>
+
+<ResponseExample>
+```json Completed
+{
+  "type": "status",
+  "status": "completed",
+  "filename": "My Manga - Chapter 1-10.pdf"
+}
+```
+</ResponseExample>
+
+### Progress message
+
+Provides real-time download progress updates.
+
+<ResponseField name="type" type="string">
+  Set to `"progress"`
+</ResponseField>
+
+<ResponseField name="current" type="integer">
+  Number of chapters downloaded
+</ResponseField>
+
+<ResponseField name="total" type="integer">
+  Total number of chapters to download
+</ResponseField>
+
+<ResponseExample>
+```json Progress update
+{
+  "type": "progress",
+  "current": 5,
+  "total": 10
+}
+```
+</ResponseExample>
+
+### Log message
+
+Streams detailed log messages during the download process.
+
+<ResponseField name="type" type="string">
+  Set to `"log"`
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  The log message text
+</ResponseField>
+
+<ResponseExample>
+```json Log message
+{
+  "type": "log",
+  "message": "[INFO] Fetching manga metadata..."
+}
+```
+</ResponseExample>
+
+<ResponseExample>
+```json Success log
+{
+  "type": "log",
+  "message": "[SUCCESS] PDF Generated: My Manga - Chapter 1-10.pdf"
+}
+```
+</ResponseExample>
+
+### Error message
+
+Reports errors that occur during processing.
+
+<ResponseField name="type" type="string">
+  Set to `"error"`
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Error description
+</ResponseField>
+
+<ResponseExample>
+```json Missing URL
+{
+  "type": "error",
+  "message": "No URL provided"
+}
+```
+</ResponseExample>
+
+<ResponseExample>
+```json Server busy
+{
+  "type": "error",
+  "message": "Server is currently busy. Please try again later."
+}
+```
+</ResponseExample>
+
+<ResponseExample>
+```json Internal error
+{
+  "type": "error",
+  "message": "An unexpected internal error occurred during processing."
+}
+```
+</ResponseExample>
+
+## Message flow
+
+Here's the typical sequence of messages when you start a download:
+
+1. **Client:** Send start command with URL
+2. **Server:** Status message (`"running"`)
+3. **Server:** Multiple log messages with download progress
+4. **Server:** Multiple progress messages with chapter counts
+5. **Server:** Log message indicating PDF generation
+6. **Server:** Status message (`"completed"`) with filename
+
+If you cancel:
+
+1. **Client:** Send cancel command
+2. **Server:** Log message ("Cancelling...")
+3. **Server:** Download stops gracefully
+
+## Security features
+
+### DoS protection
+
+The server limits concurrent downloads to prevent resource exhaustion:
+
+<ResponseField name="MAX_DOWNLOADS" type="integer" default="3">
+  Maximum number of simultaneous downloads allowed
+</ResponseField>
+
+When the limit is reached, new download requests receive an error message asking you to try again later.
+
+### Information leakage prevention
+
+Internal exceptions are logged server-side but sanitized error messages are sent to clients to prevent exposing sensitive system information.
+
+## Connection handling
+
+The WebSocket connection remains open throughout the download process. The server handles disconnections gracefully and cleans up resources automatically.
